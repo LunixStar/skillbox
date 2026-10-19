@@ -1,0 +1,12 @@
+[package]
+name = "skillbox-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 唯一外部依赖：序列化派生（无 IO、无框架）
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

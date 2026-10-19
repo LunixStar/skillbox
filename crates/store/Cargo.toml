@@ -1,0 +1,9 @@
+[package]
+name = "skillbox-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite = { workspace = true }
+skillbox-domain = { workspace = true }

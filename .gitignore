@@ -1,0 +1,6 @@
+/target
+node_modules/
+dist/
+*.local
+.DS_Store
+crates/app/gen/

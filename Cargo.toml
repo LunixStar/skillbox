@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/ports",
+    "crates/adapters",
+    "crates/engine",
+    "crates/store",
+    "crates/ipc",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+
+[workspace.dependencies]
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 数据库（bundled：随源码编译 SQLite，只做索引，不存正文）
+rusqlite = { version = "0.32", features = ["bundled"] }
+# ports 的生产实现所需
+sha2 = "0.10"
+junction = "1"
+# Tauri 壳（仅允许 app / ipc 依赖）
+tauri = { version = "2" }
+tauri-build = { version = "2" }
+
+# 内部 crate（依赖方向：app → ipc → engine → {adapters, store, ports} → domain）
+skillbox-domain = { path = "crates/domain" }
+skillbox-ports = { path = "crates/ports" }
+skillbox-adapters = { path = "crates/adapters" }
+skillbox-engine = { path = "crates/engine" }
+skillbox-store = { path = "crates/store" }
+skillbox-ipc = { path = "crates/ipc" }
+
+# 体积预算：release 二进制 ≤ 12 MB（§7.1）
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = true

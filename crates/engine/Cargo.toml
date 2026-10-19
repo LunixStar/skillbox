@@ -1,0 +1,12 @@
+[package]
+name = "skillbox-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+skillbox-domain = { workspace = true }
+skillbox-ports = { workspace = true }
+skillbox-adapters = { workspace = true }
+skillbox-store = { workspace = true }

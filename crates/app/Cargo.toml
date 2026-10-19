@@ -1,0 +1,15 @@
+[package]
+name = "skillbox-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SkillBox —— AI Agent Skills 桌面管理器（Tauri 壳）"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+skillbox-ipc = { workspace = true }

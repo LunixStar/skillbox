@@ -1,0 +1,12 @@
+[package]
+name = "skillbox-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { workspace = true }
+skillbox-domain = { workspace = true }
+skillbox-engine = { workspace = true }
