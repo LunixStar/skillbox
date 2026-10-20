@@ -399,7 +399,7 @@ pub struct InstallRequest {
 }
 
 /// 单个工具上的部署结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolDeployOutcome {
     /// 已部署（或原位链接已存在且正确）。

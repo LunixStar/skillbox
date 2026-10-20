@@ -6,10 +6,14 @@ license.workspace = true
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 skillbox-domain = { workspace = true }
 skillbox-ports = { workspace = true }
 skillbox-adapters = { workspace = true }
 skillbox-store = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 # scan_bench：简单计时（不引 criterion，控制依赖面与体积）
 [[bench]]

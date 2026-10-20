@@ -11,9 +11,14 @@
 //! - 依赖方向：只依赖 domain / ports / adapters / store，禁止依赖 ipc / app。
 //! - 所有 IO 经由 ports 注入（tmpfs + 假时钟可完整单测）。
 
+pub mod deploy;
 pub mod scan;
 pub mod types;
 
+pub use deploy::{
+    deploy, undeploy, DeployRequest, DeployTarget, ToolUndeployOutcome, ToolUndeployResult,
+    UndeployReport, UndeployRequest, UndeployTarget,
+};
 pub use scan::scan;
 pub use types::*;
 
@@ -85,34 +90,10 @@ pub fn install(req: InstallRequest) -> AppResult<SkillId> {
     todo!("Phase 1：实现入库（engine/src/install.rs）")
 }
 
-/// 部署：把中央库正本以链接（symlink → junction → tracked copy 回退链）
-/// 写入指定 agent 目录。
-///
-/// 契约：
-/// - 写入纪律（§5.3）：先写临时目录 → 同卷原子 rename；写前 mute 文件监听。
-/// - 授权（§5.2）：`TargetState` 非 overwritable 的目标在未获 `UserConfirmed`
-///   时返回 `ToolDeployOutcome::NeedsConfirmation` 或 `TargetConflict` 错误
-///   （携带 `details.conflicts` 路径清单）。
-/// - 退化为 copy 时必须写入 `.skillbox-source.json` 记录源路径，且 UI
-///   标注"副本模式（非实时同步）"。
-pub fn deploy(
-    skill: SkillId,
-    tools: &[ToolId],
-    policy: ReplacePolicy<'_>,
-) -> AppResult<DeployReport> {
-    let _ = (skill, tools, &policy);
-    todo!("Phase 1：实现链接部署（engine/src/deploy.rs）")
-}
-
-/// 取消部署：从指定 agent 目录移除链接，正本仍在中央库。
-///
-/// 契约：只允许删除"我们风格的链接"；对 `RealDir` / `ForeignLink`
-/// 一律拒绝（删除语义两级：取消部署 ≠ 删除 Skill，§10）。
-pub fn undeploy(skill: SkillId, tools: &[ToolId]) -> AppResult<()> {
-    let _ = (skill, tools);
-    todo!("Phase 1：实现取消部署（engine/src/deploy.rs）")
-}
-
+// 部署 / 取消部署：链接部署与显式覆盖授权（§5）已实现，见
+// deploy / undeploy 与 `engine/src/deploy.rs`（含硬约束清单）；
+// 单测（真实文件系统 + 注入失败点 + 固定时钟）见
+// `engine/src/deploy/tests.rs`。
 // ---------------------------------------------------------------------------
 // 专业面板（§9）
 // ---------------------------------------------------------------------------
