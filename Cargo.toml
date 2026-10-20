@@ -24,6 +24,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # ports 的生产实现所需
 sha2 = "0.10"
 junction = "1"
+# adapters 路径解析所需（home_dir / config_dir）
+dirs = "6"
 # Tauri 壳（仅允许 app / ipc 依赖）
 tauri = { version = "2" }
 tauri-build = { version = "2" }

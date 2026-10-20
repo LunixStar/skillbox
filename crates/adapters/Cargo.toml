@@ -5,4 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+serde = { workspace = true }
+dirs = { workspace = true }
 skillbox-domain = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

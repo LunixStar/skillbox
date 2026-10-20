@@ -2,20 +2,27 @@
 //!
 //! agent 声明表 + 路径解析（TASKBOOK §4）。本层是**纯函数**：
 //! 输入 home / config_dir，输出候选路径；不做任何文件系统访问——
-//! `is_installed()` 与目录探测由 engine 通过 ports::FileSystem 执行。
+//! [`ToolAdapter::is_installed`] 的存在性检查以闭包注入，
+//! 由 engine 传 `ports::FileSystem` 包装。
 //!
-//! v1 内置 16 个工具声明（Phase 1 填充），每个 adapter 的注释必须写清
-//! 该路径的来源依据（官方文档/仓库）。
+//! 模块划分（单文件 ≤ 600 行红线）：
+//! - [`table`]：§4.2 全部内置工具声明，按形态分组排列；
+//! - [`resolve`]：路径解析（`.config/` → XDG 映射、覆写、项目级、只读目录）。
 //!
 //! 【硬约束】本 crate 禁止引用 tauri 任何命名空间。
+
+mod resolve;
+mod table;
+
+pub use resolve::{home, PathScope, ResolvedScanDir, ScanDirKind, ToolOverrides};
+pub use table::{all, find, grouped_by_form_factor, ALL};
 
 use skillbox_domain::{FormFactor, PlatformMask};
 
 /// 单个 agent 工具的声明（§4.1）。
 ///
 /// 所有字段为静态数据；路径支持 `.config/` 前缀自动映射到
-/// `dirs::config_dir()`（Linux XDG）——解析规则在 Phase 1 的
-/// `resolve_*` 纯函数中实现。
+/// `dirs::config_dir()`（Linux XDG）——解析规则见 [`PathScope::resolve`]。
 #[derive(Debug, Clone)]
 pub struct ToolAdapter {
     /// 稳定标识（如 `"claude_code"`），即 `ToolId` 的来源。

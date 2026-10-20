@@ -72,11 +72,11 @@ impl PlatformMask {
     pub const ALL: PlatformMask = PlatformMask(0b111);
 
     /// 是否完整包含 `other` 的所有平台位。
-    pub fn contains(self, other: PlatformMask) -> bool {
+    pub const fn contains(self, other: PlatformMask) -> bool {
         self.0 & other.0 == other.0
     }
 
-    pub fn union(self, other: PlatformMask) -> PlatformMask {
+    pub const fn union(self, other: PlatformMask) -> PlatformMask {
         PlatformMask(self.0 | other.0)
     }
 

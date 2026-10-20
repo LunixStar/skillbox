@@ -1,5 +1,41 @@
 # SkillBox 开发进度
 
+## Step 2 Adapters 声明表
+
+状态：完成
+
+做了：
+- `ToolAdapter` 声明结构（§4.1 字段一个不少）落在 lib.rs；表与解析拆为 `table.rs`（396 行）+ `resolve.rs`（376 行），均 ≤ 600 行红线。
+- 填写 §4.2 全部内置工具声明，按形态分组排列：**CLI 6 / IDE·桌面端 5 / 编辑器插件 4 / 终端 TUI 2 / 桌面助手 2，共 19 个**。注意：TASKBOOK 正文写"16 个"但 §4.2 表格实际列举 19 个，按任务指示"以表格为准"实现 19 个，**数目差异待用户裁决**。
+- 每个 adapter 三段式注释：路径来源依据（官方文档/仓库）/ 全局与项目级是否不对称 / 平台差异。无官方依据的 skills 子目录一律标注【待复核】（交付 docs/adapters.md 时核验）：grok / windsurf / antigravity / crush / amp / hermes 的 skills 子目录；zed 在 macOS/Windows 的目录大小写。
+- 路径解析（resolve.rs，纯函数、零 IO）：
+  - `PathScope { home, config }` 可注入；生产入口 `home()` → `dirs::home_dir()`，`PathScope::current()` → `dirs::config_dir()`。
+  - `.config/` 前缀自动映射配置根（Linux XDG）：默认 `~/.config` 与 `XDG_CONFIG_HOME` 覆写两种情形均有测试。
+  - `ToolOverrides`：覆写优先于默认表路径；覆写即视为已安装（§4.2）。
+  - 项目级目录相对**项目根**解析（OpenCode 全局 `.config/opencode/skills` 与项目 `.opencode/skills` 不对称，有专项测试）。
+- `is_installed()`：探测路径任一存在或被覆写；存在性检查以闭包注入（本层零 IO，engine 传 ports::FileSystem 包装）。
+- `platform_matches()` / `available_on()`（纯函数可断言任意平台掩码）；`link_capability()`（Unix→Symlink / Windows→Junction / 其他→CopyOnly）。
+- extra_scan_dirs 类型级只读：`ResolvedScanDir { kind: ReadOnly }`（§4.3 只发现登记、不部署，serde 输出 `"readOnly"`）。claude_code（`.claude/plugins`）与 cursor（`.cursor/extensions`）带真实 extra 目录。
+- 附带改动：`PlatformMask::contains/union` 改为 `const fn`（const 声明表中 `WINDOWS.union(MACOS)` 需要）；workspace 新增 `dirs = "6"`。
+- 单测 23 个（adapters），覆盖任务要求的全部场景：XDG 两种情形映射、覆写优先、平台掩码过滤（Trae 无 Linux / Amp 无原生 Windows，全表过滤也断言）、19 个 id 无重复且全部解析出非空 skills 路径、分组计数 6/5/4/2/2、Hermes 唯一 recursive_scan、只读目录 camelCase 序列化。
+
+没做：
+- engine 对 adapters 的消费（scan roots 组装等，Phase 1 后续步骤，engine 的 todo!() 未动）。
+- docs/adapters.md（交付物，待【待复核】路径经官方来源核验后汇入）。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace -- -D warnings` → `Finished dev profile in 8.04s`，EXIT=0，零警告
+2. `cargo test --workspace` → EXIT=0；39 passed / 0 failed（adapters 23、domain 6、ports 5、store 5）
+3. `grep "tauri::"` 于 domain/ports/adapters/engine/store → 0
+4. 最大源文件 ports/src/prod.rs 404 行 ≤ 600；新增 table.rs 396、resolve.rs 376
+5. `target/release/skillbox-app.exe` → 5.87 MB（预算 ≤ 12 MB，与 Step 1 持平）
+
+遗留风险：
+- 19 vs 16 数目差异待用户裁决（影响后续 tools.list 契约与 docs/adapters.md 篇幅）。
+- Trae / Trae CN 共用一条声明（两个候选目录）；若需拆成两个 adapter 改动很小。
+- 【待复核】路径清单见上；Phase 3 前 UI 不应假设这些路径必然存在（engine 探测失败会优雅降级）。
+- Hermes docs_url 暂为空字符串（官方文档未定），UI 需容忍空值。
+
 ## Step 1 骨架与契约
 
 状态：完成
