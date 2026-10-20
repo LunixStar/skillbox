@@ -28,6 +28,10 @@ pub struct DbScanCache {
 impl DbScanCache {
     pub fn new(conn: Connection) -> AppResult<Self> {
         crate::run_migrations(&conn)?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| AppError::database(format!("PRAGMA journal_mode=WAL 失败: {e}")))?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(|e| AppError::database(format!("PRAGMA synchronous=NORMAL 失败: {e}")))?;
         Ok(Self { conn })
     }
 

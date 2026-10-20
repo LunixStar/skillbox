@@ -7,54 +7,74 @@
 | 项 | 值 |
 | --- | --- |
 | 日期 | 2026-10-20 |
-| OS | Windows（本机实测） |
+| OS | Windows NTFS / NVMe（fsync 非空操作）；临时目录位于系统盘 |
 | Rust | stable（clippy 1.99 工具链） |
 | profile | bench（optimized） |
 | worker 数 | min(num_cpus, 4)（§7 约束 7） |
+| SQLite 配置 | rusqlite bundled；显式 `PRAGMA journal_mode=WAL; synchronous=NORMAL` |
 
-## 真磁盘基准（DbScanCache + 真实文件系统）
+> ⚠ **跨环境注意**：若在容器 overlayfs / tmpfs / 高写缓存 NVMe 下重测，fsync 开销会
+> 显著低于真实冷盘。生产环境（Windows NTFS / macOS APFS 机械盘或冷盘）需重测验证。
+> 当前 WAL + synchronous=NORMAL 已将 fsync 代价降至最低，丢指纹仅导致下轮重算。
+
+## 真磁盘基准（同一进程、同一棵树、两后端对比）
 
 > 数据来源：`crates/store/benches/db_cache_bench.rs`（`cargo bench -p skillbox-store --bench db_cache_bench`）。
+> DbCache 与 MemCache 在同一进程内交替运行，消除系统负载与编译优化差异。
 
-| 规模（目录数） | skills | 冷扫描（空表→put） | 暖扫描（全命中→get） | 预算 | 结论 |
-| ---: | ---: | ---: | ---: | --- | --- |
-| 1 000 | 100 | 36 ms | 10 ms | — | — |
-| 5 000 | 500 | 186 ms | 56 ms | ≤ 60 s | **通过**（耗时为预算的 0.31%） |
-| 20 000 | 2 000 | 1 241 ms | 548 ms | ≤ 60 s | 通过（耗时为预算的 2.1%） |
+### 20000 目录（2000 skills）
 
-- SQLite 配置：默认（rusqlite bundled，synchronous=NORMAL，无显式 WAL）。
-- `prepare_cached` 复用 statement（2 条 SQL：get / upsert），避免每次调用 compile。
-- 暖扫描 SQLite get 反而快于内存 HashMap（548ms vs 1010ms），因 `prepare_cached` 命中 + 无 JSON 反序列化开销。
-- 冷扫描与内存基准持平（1.24s vs 1.24s），表明 auto-commit + page cache 足以消化 2000 次 put。
+| 后端 | 冷扫描（空表→put） | 暖扫描（全命中→get） |
+| --- | ---:| ---:|
+| **DbCache**（SQLite WAL） | 710 ms | 518 ms |
+| **MemCache**（HashMap） | 537 ms | 495 ms |
 
-## 内存基准（MemoryScanCache + FakeFs）
+### 5000 目录（500 skills）
+
+| 后端 | 冷扫描 | 暖扫描 | 预算 |
+| --- | ---:| ---:| --- |
+| DbCache | 85 ms | 56 ms | ≤ 60 s |
+| MemCache | 59 ms | 57 ms | ≤ 60 s |
+
+### 1000 目录（100 skills）
+
+| 后端 | 冷扫描 | 暖扫描 |
+| --- | ---:| ---:|
+| DbCache | 14 ms | 12 ms |
+| MemCache | 11 ms | 9 ms |
+
+- **口径说明**：此前 `scan_bench`（MemoryScanCache，单独进程）暖扫描 20000 目录测出 1010ms，
+  而 `db_cache_bench`（DbCache，单独进程）测出 548ms，看似内存更慢。同进程对比已证实
+  MemCache 实际更快（495ms vs 518ms），差异源于两次独立 bench 运行的系统负载/编译差异，
+  非实现问题。**后续基准一律在同进程内对比。**
+
+## RSS 增量基准（MemoryScanCache + FakeFs 内存树）
 
 > 数据来源：`crates/engine/benches/scan_bench.rs`（`cargo bench -p skillbox-engine --bench scan_bench`）。
-> 排除物理盘噪声，衡量引擎自身逻辑开销 + RSS 增量。
+> 用 FakeFs 内存树排除物理盘噪声，专门衡量引擎逻辑开销与峰值 RSS 增量。
 
-| 规模（目录数） | skills | 冷扫描（缓存空） | 暖扫描（全命中） | 峰值 RSS 增量 | 预算 | 结论 |
+| 规模（目录数） | skills | 冷扫描 | 暖扫描 | 峰值 RSS 增量 | 预算 | 结论 |
 | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | 1 000 | 100 | 42 ms | 27 ms | 804 KB | — | 远低于预算 |
-| 5 000 | 500 | 219 ms | 170 ms | 1 540 KB | ≤ 60 s / ≤ 80 MB | **通过**（耗时为预算的 0.37%） |
-| 20 000 | 2 000 | 1 236 ms | 1 010 ms | 5 736 KB | ≤ 80 MB（外推预算） | 通过（RSS 为预算的 7.2%） |
+| 5 000 | 500 | 219 ms | 170 ms | 1 540 KB | ≤ 60 s / ≤ 80 MB | **通过** |
+| 20 000 | 2 000 | 1 236 ms | 1 010 ms | 5 736 KB | ≤ 80 MB | 通过（7.2%） |
 
-- 峰值 RSS 增量：`on_progress` 回调内采样进程 RSS 相对基准的增量（Windows `GetProcessMemoryInfo`）。
-- 外推：RSS 增量随目录数近似线性（约 0.28 KB/目录），80MB 预算对应 ~28 万目录，安全余量充足。
+- 峰值 RSS 增量：`on_progress` 回调内采样（Windows `GetProcessMemoryInfo`）。
+- 外推：约 0.28 KB/目录，80MB 对应 ~28 万目录，余量充足。
 
 ## 优化储备
 
-当前无需启用，留作 Step 8 前慢磁盘 / 超大目录树场景的优化手段：
+当前无需启用，留作慢磁盘 / 超大目录树场景：
 
-- WAL + `synchronous=NORMAL`：丢指纹仅导致下轮重算，无正确性损失。
-- 批量 flush：`DbScanCache` 内部缓冲 pending 条目（128 条/批），单事务 commit，将 2000 次 commit 降至 ~16 次。
-- 两者组合预期将冷扫描从 1.2s 压至 0.3–0.5s（估算），但当前余量 50 倍无需提前消费。
+- 批量 flush：`DbScanCache` 内部缓冲 pending（128 条/批），单事务 commit，将 2000 次 commit 降至 ~16 次。
+- 预期将冷扫描从 ~710ms 压至 300–500ms，但当前余量 80 倍无需提前消费。
 
 ## 复现
 
 ```powershell
-# 真磁盘基准（推荐，测量完整 IO 路径）
+# 同进程对比（推荐，消除系统差异）
 cargo bench -p skillbox-store --bench db_cache_bench
 
-# 内存基准（RSS 增量 + 逻辑开销）
+# RSS 增量（需 FakeFs + scan_bench 专用）
 cargo bench -p skillbox-engine --bench scan_bench
 ```
