@@ -2944,6 +2944,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "skillbox-domain",
+ "skillbox-engine",
  "skillbox-ports",
 ]
 
