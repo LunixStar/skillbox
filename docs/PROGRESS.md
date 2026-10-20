@@ -1,5 +1,39 @@
 # SkillBox 开发进度
 
+## Step 3 有界增量扫描引擎
+
+状态：完成
+
+做了：
+- `engine::scan` 全量实现（scan.rs 501 行 + scan/tests.rs + types.rs 重写 + benches/scan_bench.rs），§7 全部 11 条硬约束逐条落位，scan.rs 顶部清单标注精确行号。
+- ScanRequest/ScanProgress/ScanReport 等类型按用户指定结构重写（types.rs）；ScanRequest 携带注入的 `fs: Arc<dyn FileSystem>` / `clock: Arc<dyn Clock>` / `cache: Option<Arc<Mutex<dyn ScanCache>>>`，不做序列化（IPC 层另设 DTO），手写 Debug。
+- 手工工作池：`Mutex<PoolState>` + Condvar `wait_timeout(50ms)`，固定 worker `min(num_cpus, 4)`，全部线程在 `std::thread::scope` 内；取消后 ≤ 200ms 返回部分结果（50ms 唤醒粒度 + 目录收尾）。
+- 深度硬上限 6（请求 >6 钳制）；内置 12 项黑名单（Windows 大小写不敏感 / Unix 精确）+ 用户追加；符号链接按 lstat 记 Symlink 跳过不入队；卷检查仅在 depth==0 根（Windows `GetDriveTypeW==DRIVE_FIXED`，UNC 视为非本地，Unix 跳 proc/sys/dev/mnt）。
+- 增量指纹（mtime_ms, size, child_count）：命中复用缓存 name/description 免重读 SKILL.md，未命中截断读前 8KB 解析 frontmatter（BOM/CRLF/引号/截断容错）后 upsert。缓存失败降级全量读并记 warning，不中断扫描。
+- 端口扩展：ports 新增 `ScanCache` trait / `CachedScanEntry` / `MemoryScanCache` / `FileSystem::is_local_volume`（windows-sys 0.59：GetDriveTypeW 在 Win32_Storage_FileSystem，DRIVE_FIXED 在 Win32_System_WindowsProgramming）；store 新增 `DbScanCache`（SQLite upsert，指纹列存完整条目 JSON，schema 兼容）。
+- 报告确定性：并发遍历顺序不稳定，skills/skipped 按路径排序、warnings 字典序，保证同磁盘状态同报告（增量 UI diff 前提）。
+- FakeFs 内存文件系统（含 read_head/read_dir 计数器、last_head_limit 断言 8KB 截断、local 卷开关）+ FakeClock；12 个测试覆盖任务要求的 5 个场景（深度 8 层级/符号链接自环/黑名单/增量缓存命中读计数/取消部分返回）+ 卷跳过/8KB 截断/进度节流/不可读根降级等。
+- 基准（scan_bench.rs，harness=false，RSS 采样 GetProcessMemoryInfo）：1000/5000/20000 目录三档冷+暖扫描，真实数字已录入 docs/PERFORMANCE.md。5000 目录冷 219ms（预算 60s 的 0.37%），20000 目录峰值 RSS 增量 5.7MB（预算 80MB 的 7.2%）。
+
+没做：
+- engine 其余 8 个函数仍为 todo!()（按步骤边界，Phase 1 后续步骤）。
+- scan 与 adapters 的 roots 组装、与 store DbScanCache 的生产接线（后续步骤）。
+- docs/adapters.md 交付物（Step 2 遗留，待【待复核】路径核验）。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 2.83s`，EXIT=0，零警告
+2. `cargo test --workspace` → EXIT=0；52 passed / 0 failed（adapters 23、domain 6、engine 11、ports 5、store 7）
+3. `grep "tauri::"` 于 domain/ports/adapters/engine/store → 0
+4. 最大源文件 scan.rs 501 行 ≤ 600；tests.rs、types.rs 均在红线内
+5. `cargo bench -p skillbox-engine --bench scan_bench` → 20000 目录冷 1236ms / 暖 1010ms / 峰值 RSS 增量 5736KB（预算 80MB）
+6. 基准预算复核：5000 目录 219ms ≤ 60s；RSS 增量线性外推 ~0.28KB/目录，80MB 对应 ~28 万目录，余量充足
+
+遗留风险 / 备案：
+- **store→ports 同层依赖**（store 的 DbScanCache 实现 ports 的 ScanCache trait）：这是全 workspace 唯一同层边，adapters 刻意经闭包避开 ports 而此处绕不开（trait 定义在端口层、实现归属存储层）。无环、无逆向、不跨层，已在 scan_cache.rs 头注释备案，PROGRESS 一并记录待用户追认。
+- 19 vs 16 工具数目差异（Step 2 遗留）待用户裁决。
+- 基准用 FakeFs 内存树（排除物理盘噪声，衡量引擎自身开销）；真实磁盘冷扫描受 IO 影响会变慢，但预算余量 200 倍以上。
+- Windows 卷检查依赖 canonicalize 前缀解析，verbatim 路径（`\\?\C:\`）已处理，但subst/网络驱动器映射盘符的边界行为未专项测试。
+
 ## Step 2 Adapters 声明表
 
 状态：完成

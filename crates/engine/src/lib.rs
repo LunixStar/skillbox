@@ -11,8 +11,10 @@
 //! - 依赖方向：只依赖 domain / ports / adapters / store，禁止依赖 ipc / app。
 //! - 所有 IO 经由 ports 注入（tmpfs + 假时钟可完整单测）。
 
+pub mod scan;
 pub mod types;
 
+pub use scan::scan;
 pub use types::*;
 
 use skillbox_domain::{AppResult, ReplacePolicy, SkillId, ToolId};
@@ -20,30 +22,9 @@ use skillbox_domain::{AppResult, ReplacePolicy, SkillId, ToolId};
 // ---------------------------------------------------------------------------
 // scan —— 扫描（§7）
 // ---------------------------------------------------------------------------
-
-/// 扫描 agent 目录与中央库，发现 `SKILL.md` 目录包。
-///
-/// 契约（§7 全部 11 条硬约束）：
-/// 1. 不读文件内容：候选判定只看 `read_dir` + `symlink_metadata`；
-///    `SKILL.md` 只在确定为 skill 目录后截断读取前 8 KB。
-/// 2. 递归深度 ≤ `ScanRequest::depth_limit`（默认 6）。
-/// 3. 黑名单目录跳过（内置 + 用户追加）。
-/// 4. 不跟随符号链接（防循环与越权）。
-/// 5. 跳过网络卷 / 可移动卷。
-/// 6. 增量指纹 `(mtime, size, 子项数)` 未变则复用 `scan_cache`。
-/// 7. 并发工作线程 `min(num_cpus, 4)`，禁止无界 spawn。
-/// 8. 可中断：每个目录检查一次 `cancel`，取消后 200 ms 内返回部分结果。
-/// 9. 流式进度：每 50 个目录回调一次 `on_progress`。
-/// 10. 内存：峰值 RSS 增量 ≤ 80 MB，分批产出。
-/// 11. 扫描过程禁止任何网络 / git 操作。
-pub fn scan(
-    req: ScanRequest,
-    cancel: CancellationToken,
-    on_progress: impl Fn(ScanProgress),
-) -> AppResult<ScanReport> {
-    let _ = (&req, &cancel, &on_progress);
-    todo!("Phase 1：实现 §7 全部 11 条扫描约束（engine/src/scan.rs）")
-}
+//
+// 实现与 §7 全部 11 条约束的逐条标注见 `engine/src/scan.rs` 顶部清单；
+// 单测（FakeFileSystem / FakeClock 注入）见 `engine/src/scan/tests.rs`。
 
 // ---------------------------------------------------------------------------
 // reconcile —— 对账（§6）

@@ -6,8 +6,10 @@
 //!（只存 name / description 摘要）、任何密钥。
 
 pub mod migrate;
+pub mod scan_cache;
 
 pub use migrate::{current_version, run_migrations};
+pub use scan_cache::DbScanCache;
 
 use std::path::Path;
 

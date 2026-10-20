@@ -138,6 +138,44 @@ impl FileSystem for ProdFileSystem {
     fn canonicalize(&self, path: &Path) -> AppResult<PathBuf> {
         Ok(fs::canonicalize(path)?)
     }
+
+    fn is_local_volume(&self, path: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            use std::path::{Component, Prefix};
+            use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+            use windows_sys::Win32::System::WindowsProgramming::DRIVE_FIXED;
+            // 规范化失败（路径不存在等）按原路径兜底；UNC（\\server\share）
+            // 无盘符 → 一律视为网络卷跳过。
+            let canon = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let disk = match canon.components().next() {
+                Some(Component::Prefix(p)) => match p.kind() {
+                    Prefix::Disk(d) | Prefix::VerbatimDisk(d) => Some(d),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(disk) = disk else { return false };
+            let root = format!("{}:\\", disk as char);
+            let mut wide: Vec<u16> = root.encode_utf16().collect();
+            wide.push(0);
+            // 只认 DRIVE_FIXED（本地固定盘）；REMOTE / REMOVABLE / CDROM /
+            // RAMDISK / UNKNOWN 一律跳过（保守取向，§7 约束 5）。
+            unsafe { GetDriveTypeW(wide.as_ptr()) == DRIVE_FIXED }
+        }
+        #[cfg(not(windows))]
+        {
+            // Unix：/proc /sys /dev /mnt 按首段前缀跳过（§7 约束 5）。
+            let first = path.components().find_map(|c| match c {
+                std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                _ => None,
+            });
+            match first.as_deref() {
+                Some("proc" | "sys" | "dev" | "mnt") => false,
+                _ => true,
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

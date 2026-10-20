@@ -10,3 +10,15 @@ skillbox-domain = { workspace = true }
 skillbox-ports = { workspace = true }
 skillbox-adapters = { workspace = true }
 skillbox-store = { workspace = true }
+
+# scan_bench：简单计时（不引 criterion，控制依赖面与体积）
+[[bench]]
+name = "scan_bench"
+harness = false
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+] }

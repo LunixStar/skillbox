@@ -13,10 +13,12 @@ pub mod prod;
 
 pub use prod::{ProdClock, ProdFileSystem, ProdGitClient, ProdHasher, ProdLinker};
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use skillbox_domain::AppResult;
+use skillbox_domain::{AppResult, ScanFingerprint};
 
 // ---------------------------------------------------------------------------
 // 共享数据结构
@@ -108,6 +110,11 @@ pub trait FileSystem: Send + Sync {
     fn remove_file(&self, path: &Path) -> AppResult<()>;
 
     fn canonicalize(&self, path: &Path) -> AppResult<PathBuf>;
+
+    /// 路径是否位于本机固定卷（§7 约束 5：跳过网络卷 / 可移动卷 /
+    /// 系统伪文件系统）。仅在扫描根（depth == 0）调用——逐目录 syscall
+    /// 代价过高，且根之下的遍历不跨卷（符号链接不会入队）。
+    fn is_local_volume(&self, path: &Path) -> bool;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,4 +198,64 @@ pub trait GitClient: Send + Sync {
 
     /// 检出指定 revision。
     fn checkout(&self, repo: &Path, revision: &str) -> AppResult<()>;
+}
+
+// ---------------------------------------------------------------------------
+// ScanCache（§7 约束 6）
+// ---------------------------------------------------------------------------
+
+/// `scan_cache` 单条缓存：目录指纹 + 上次解析出的 name / description。
+/// 指纹 `(mtime, size, childCount)` 未变时直接复用，免重读 `SKILL.md`。
+/// name / description 属于摘要字段，不违反"DB 禁存正文 / frontmatter 全文"
+/// 约束（§3.1 允许存 name / description 摘要）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedScanEntry {
+    /// 目录绝对路径（缓存键）。
+    pub path: PathBuf,
+    /// 目录指纹 `(mtime, size, childCount)`。
+    pub fingerprint: ScanFingerprint,
+    /// 上次解析出的 frontmatter `name`。
+    pub name: Option<String>,
+    /// 上次解析出的 frontmatter `description`。
+    pub description: Option<String>,
+    /// 上次写入时间（epoch 毫秒），为后续淘汰策略预留。
+    pub last_seen_ms: i64,
+}
+
+/// 扫描缓存端口（`scan_cache` 表 / 内存实现）。
+///
+/// 实现只需 `Send`：engine 侧以 `Arc<Mutex<dyn ScanCache>>` 共享给工作
+/// 线程（rusqlite `Connection` 非 `Sync`，必须串行化访问）。
+pub trait ScanCache: Send {
+    /// 取缓存条目；未命中返回 `None`。
+    fn get(&self, path: &Path) -> AppResult<Option<CachedScanEntry>>;
+    /// 写入（upsert）缓存条目。
+    fn put(&self, entry: &CachedScanEntry) -> AppResult<()>;
+}
+
+/// 内存扫描缓存：测试注入与"无 DB"场景。
+#[derive(Debug, Default)]
+pub struct MemoryScanCache {
+    inner: Mutex<HashMap<PathBuf, CachedScanEntry>>,
+}
+
+impl MemoryScanCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl ScanCache for MemoryScanCache {
+    fn get(&self, path: &Path) -> AppResult<Option<CachedScanEntry>> {
+        Ok(self.inner.lock().expect("MemoryScanCache poisoned").get(path).cloned())
+    }
+
+    fn put(&self, entry: &CachedScanEntry) -> AppResult<()> {
+        self.inner
+            .lock()
+            .expect("MemoryScanCache poisoned")
+            .insert(entry.path.clone(), entry.clone());
+        Ok(())
+    }
 }

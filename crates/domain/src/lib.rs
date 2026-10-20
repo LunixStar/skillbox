@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn serde_is_camel_case() {
         let state = TargetState::RealDir;
-        let json = serde_json::to_value(&state).unwrap();
+        let json = serde_json::to_value(state).unwrap();
         assert_eq!(json, serde_json::json!("realDir"));
 
         let meta = SkillMeta {

@@ -26,6 +26,8 @@ sha2 = "0.10"
 junction = "1"
 # adapters 路径解析所需（home_dir / config_dir）
 dirs = "6"
+# Windows API（ports 卷类型判定 / bench RSS 采样）
+windows-sys = "0.59"
 # Tauri 壳（仅允许 app / ipc 依赖）
 tauri = { version = "2" }
 tauri-build = { version = "2" }

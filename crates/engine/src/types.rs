@@ -4,10 +4,11 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use skillbox_domain::{DiscoveredSkill, ScanFingerprint, SkillId, SyncMode, TargetState, ToolId};
+use skillbox_ports::{Clock, FileSystem, ScanCache};
 
 // ---------------------------------------------------------------------------
 // 取消令牌（§7 约束 8）
@@ -45,27 +46,87 @@ impl CancellationToken {
 // scan（§7）
 // ---------------------------------------------------------------------------
 
-/// 扫描请求。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScanRequest {
-    /// 扫描根目录（adapters 解析后的全局技能目录 + extra_scan_dirs + 中央库）。
-    pub roots: Vec<PathBuf>,
-    /// 用户追加的黑名单目录名（内置黑名单之外，§7 约束 3）。
-    pub extra_blacklist: Vec<String>,
-    /// 递归深度上限（§7 约束 2：≤ 6）。
-    pub depth_limit: u8,
-    /// 是否使用 `scan_cache` 增量指纹（§7 约束 6）。
-    pub use_cache: bool,
+/// 单个扫描根（adapters 解析出的各工具 skills 目录 + 中央库根，由调用方组装）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanRoot {
+    /// 根目录绝对路径。
+    pub path: PathBuf,
+    /// 该根所属工具；中央库根为 None。
+    pub tool_id: Option<ToolId>,
+    /// 位于 `extra_scan_dirs`（插件缓存）：只发现登记、不允许部署（§4.3）。
+    pub read_only: bool,
 }
 
-impl Default for ScanRequest {
-    fn default() -> Self {
+impl ScanRoot {
+    /// 中央库或未知来源的根。
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        ScanRoot { path: path.into(), tool_id: None, read_only: false }
+    }
+
+    /// 标记为某工具的 skills 根。
+    pub fn for_tool(mut self, tool_id: ToolId) -> Self {
+        self.tool_id = Some(tool_id);
+        self
+    }
+
+    /// 标记为只读根（extra_scan_dirs，§4.3）。
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
+}
+
+/// 扫描请求。
+///
+/// 【注意】本类型**不可序列化**：§2.2 签名固定为三参数，注入的端口实现
+/// （文件系统 / 时钟 / 缓存）只能随请求传递。IPC 层使用独立 DTO 组装，
+/// 禁止把本类型直接暴露给前端。
+#[derive(Clone)]
+pub struct ScanRequest {
+    /// 扫描根（全局 skills 目录 + extra_scan_dirs + 中央库）。
+    /// 根不受黑名单 / 深度检查约束（根是显式意图，非启发式对象）。
+    pub roots: Vec<ScanRoot>,
+    /// 递归深度上限；运行时一律钳制到 ≤ 6（§7 约束 2）。
+    pub max_depth: u8,
+    /// 用户追加的黑名单目录名（叠加在内置黑名单之上，只能增不能减，
+    /// §7 约束 3）。
+    pub blacklist: Vec<String>,
+    /// 是否启用 `scan_cache` 增量指纹（§7 约束 6）；false = 全量扫描。
+    pub incremental: bool,
+    /// 注入端口：文件系统（lstat 语义；tmpfs + FakeFs 可测）。
+    pub fs: Arc<dyn FileSystem>,
+    /// 注入端口：时钟（假时钟下 duration 可确定性断言）。
+    pub clock: Arc<dyn Clock>,
+    /// 注入端口：扫描缓存；None = 不读不写缓存。
+    pub cache: Option<Arc<Mutex<dyn ScanCache>>>,
+}
+
+impl std::fmt::Debug for ScanRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 端口句柄无有意义的 Debug，只呈现行为相关字段。
+        f.debug_struct("ScanRequest")
+            .field("roots", &self.roots)
+            .field("max_depth", &self.max_depth)
+            .field("blacklist", &self.blacklist)
+            .field("incremental", &self.incremental)
+            .field("fs", &"<dyn FileSystem>")
+            .field("clock", &"<dyn Clock>")
+            .field("cache", &self.cache.is_some())
+            .finish()
+    }
+}
+
+impl ScanRequest {
+    /// 以生产端口（真实文件系统 / 系统时钟）构造，无缓存、全量扫描。
+    pub fn with_prod_ports(roots: Vec<ScanRoot>) -> Self {
         ScanRequest {
-            roots: Vec::new(),
-            extra_blacklist: Vec::new(),
-            depth_limit: 6,
-            use_cache: true,
+            roots,
+            max_depth: 6,
+            blacklist: Vec::new(),
+            incremental: false,
+            fs: Arc::new(skillbox_ports::ProdFileSystem),
+            clock: Arc::new(skillbox_ports::ProdClock),
+            cache: None,
         }
     }
 }
@@ -74,26 +135,48 @@ impl Default for ScanRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
-    pub scanned_dirs: u64,
-    /// 总数估计（未知时为 None）。
-    pub total_estimate: Option<u64>,
-    /// 当前正在扫描的目录。
-    pub current_path: PathBuf,
-    /// 目前发现的 skill 数。
-    pub found_so_far: u64,
+    /// 已处理的目录数。
+    pub scanned: u32,
+    /// 总数估计；树大小无法预知，v1 恒为 `None`。
+    pub total_hint: Option<u32>,
+    /// 当前正在处理的目录。
+    pub current: PathBuf,
+}
+
+/// 目录被跳过的原因（透明记录，供 UI 回答"为什么没扫到"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SkipReason {
+    /// 黑名单目录（内置或用户追加，§7 约束 3）。
+    Blacklisted,
+    /// 超出深度上限（§7 约束 2）。
+    TooDeep,
+    /// 符号链接，不跟随（§7 约束 4）。
+    Symlink,
+    /// 网络卷 / 可移动卷 / 系统伪文件系统（§7 约束 5）。
+    NonLocalVolume,
+}
+
+/// 单个被跳过的目录及其原因。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedDir {
+    pub path: PathBuf,
+    pub reason: SkipReason,
 }
 
 /// 扫描报告。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanReport {
-    pub discovered: Vec<DiscoveredSkill>,
-    pub scanned_dirs: u64,
-    /// 增量指纹复用而跳过解析的目录数。
-    pub cache_hits: u64,
+    /// 发现的 skill 目录（未入库的原始磁盘观测，§6.1 磁盘真相）。
+    pub skills: Vec<DiscoveredSkill>,
+    /// 被跳过的目录及原因（黑名单 / 超深 / 符号链接 / 非本卷）。
+    pub skipped: Vec<SkippedDir>,
+    /// 非致命告警（目录不可读、SKILL.md 读取失败、缓存降级等）。
+    pub warnings: Vec<String>,
+    /// 扫描耗时（毫秒，注入时钟测得）。
     pub duration_ms: i64,
-    /// true = 被取消，`discovered` 为已扫到的部分结果。
-    pub cancelled: bool,
 }
 
 // ---------------------------------------------------------------------------
