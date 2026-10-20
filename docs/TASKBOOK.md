@@ -214,7 +214,7 @@ pub struct ToolAdapter {
 }
 ```
 
-### 4.2 v1 首批内置 16 个，按形态分组
+### 4.2 v1 首批内置 19 个，按形态分组
 
 【硬约束】**必须按形态分组呈现给 UI**，侧栏与工具页都要有"形态"分节/筛选，这是本项目与原版的关键差异。
 
@@ -490,7 +490,7 @@ updates   : check / apply
 - **DoD**：`cargo clippy -D warnings` 通过；`grep tauri::` 在 engine/domain/adapters/store 中为 0；窗口可启动。
 
 ### Phase 1 —— 内核（纯 Rust，可脱离 GUI 测试）
-5. `adapters`：16 个工具声明表 + 路径解析 + 形态分类，附单测（含 `.config/` XDG 映射、覆写路径）。
+5. `adapters`：19 个工具声明表 + 路径解析 + 形态分类，附单测（含 `.config/` XDG 映射、覆写路径）。
 6. `scan`：实现 §7 全部 11 条约束，写 `scan_bench` 与 1000/5000/20000 三档基线。
 7. `deploy`：`TargetState` 分类表 + `ReplacePolicy` 决策表，用 `tempfile` 做真实文件系统单测，**必须包含"DB 记录 symlink 但磁盘是 RealDir 时不得删除"这一用例**。
 8. `reconcile` + `doctor` + `fix`：§6.2 的 7 类差异全部覆盖，每类至少一个单测。
@@ -530,7 +530,7 @@ updates   : check / apply
 2. `crates/**` 全部源码 + engine 层单测
 3. `README.md`：架构图（crate 依赖方向）、首启流程、性能基线表
 4. `PERFORMANCE.md`：§7.1 每项的实际测量值
-5. `docs/adapters.md`：16 个工具的路径依据与形态说明
+5. `docs/adapters.md`：19 个工具的路径依据与形态说明
 6. `docs/security-rules.md`：八条规则的匹配模式与误报说明
 
 ---

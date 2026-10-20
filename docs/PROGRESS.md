@@ -30,7 +30,7 @@
 
 遗留风险 / 备案：
 - **store→ports 同层依赖**（store 的 DbScanCache 实现 ports 的 ScanCache trait）：这是全 workspace 唯一同层边，adapters 刻意经闭包避开 ports 而此处绕不开（trait 定义在端口层、实现归属存储层）。无环、无逆向、不跨层，已在 scan_cache.rs 头注释备案，PROGRESS 一并记录待用户追认。
-- 19 vs 16 工具数目差异（Step 2 遗留）待用户裁决。
+- 19 vs 16 工具数目差异（Step 2 遗留）**已裁决：按 19 统一，TASKBOOK 已更新**。
 - 基准用 FakeFs 内存树（排除物理盘噪声，衡量引擎自身开销）；真实磁盘冷扫描受 IO 影响会变慢，但预算余量 200 倍以上。
 - Windows 卷检查依赖 canonicalize 前缀解析，verbatim 路径（`\\?\C:\`）已处理，但subst/网络驱动器映射盘符的边界行为未专项测试。
 
@@ -40,7 +40,7 @@
 
 做了：
 - `ToolAdapter` 声明结构（§4.1 字段一个不少）落在 lib.rs；表与解析拆为 `table.rs`（396 行）+ `resolve.rs`（376 行），均 ≤ 600 行红线。
-- 填写 §4.2 全部内置工具声明，按形态分组排列：**CLI 6 / IDE·桌面端 5 / 编辑器插件 4 / 终端 TUI 2 / 桌面助手 2，共 19 个**。注意：TASKBOOK 正文写"16 个"但 §4.2 表格实际列举 19 个，按任务指示"以表格为准"实现 19 个，**数目差异待用户裁决**。
+- 填写 §4.2 全部内置工具声明，按形态分组排列：**CLI 6 / IDE·桌面端 5 / 编辑器插件 4 / 终端 TUI 2 / 桌面助手 2，共 19 个**（TASKBOOK §4.2 表格实际列举 19 个，已按"以表格为准"统一为 19）。
 - 每个 adapter 三段式注释：路径来源依据（官方文档/仓库）/ 全局与项目级是否不对称 / 平台差异。无官方依据的 skills 子目录一律标注【待复核】（交付 docs/adapters.md 时核验）：grok / windsurf / antigravity / crush / amp / hermes 的 skills 子目录；zed 在 macOS/Windows 的目录大小写。
 - 路径解析（resolve.rs，纯函数、零 IO）：
   - `PathScope { home, config }` 可注入；生产入口 `home()` → `dirs::home_dir()`，`PathScope::current()` → `dirs::config_dir()`。
@@ -65,7 +65,7 @@
 5. `target/release/skillbox-app.exe` → 5.87 MB（预算 ≤ 12 MB，与 Step 1 持平）
 
 遗留风险：
-- 19 vs 16 数目差异待用户裁决（影响后续 tools.list 契约与 docs/adapters.md 篇幅）。
+- 19 vs 16 数目差异已裁决：统一按 19，TASKBOOK 已更新。
 - Trae / Trae CN 共用一条声明（两个候选目录）；若需拆成两个 adapter 改动很小。
 - 【待复核】路径清单见上；Phase 3 前 UI 不应假设这些路径必然存在（engine 探测失败会优雅降级）。
 - Hermes docs_url 暂为空字符串（官方文档未定），UI 需容忍空值。
@@ -84,7 +84,7 @@
 - 附带：为满足构建在本机安装了 VS Build Tools 2022（MSVC 14.44）+ Windows SDK 26100（之前机器无任何可用链接器）。
 
 没做：
-- adapters 的 16 工具声明表与路径解析（Phase 1）。
+- adapters 的 19 工具声明表与路径解析（Phase 1，已完成）。
 - ipc 的 31 个命令实现（Phase 2；当前 register() 为直通透壳，命令清单写在文档注释里）。
 - engine 全部函数实现体（按"先签约后实现"留 todo!()）。
 - 前端只渲染 "SkillBox" 标题卡，未搭路由/状态管理/设计系统组件（Phase 3）。
