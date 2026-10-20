@@ -1,19 +1,20 @@
 # SkillBox 开发进度
 
-## Step 4 链接部署与显式覆盖授权
+## Step 4 链接部署与显式覆盖授权（v2 修订版）
 
-状态：完成
+状态：完成（含 review 修订：undeploy 执行期重分类 / 标记副本移除 / Skipped 语义）
 
 做了：
-- `engine::deploy` / `engine::undeploy` 全量实现（deploy.rs 466 行 + deploy/tests.rs 403 行），§5 全部硬约束落地，deploy.rs 顶部注释即硬约束清单。
+- `engine::deploy` / `engine::undeploy` 全量实现，§5 全部硬约束落地。deploy 模块按 600 行红线拆分：`deploy.rs`（类型与出口，150 行）+ `deploy/classify.rs`（来源标记与目标分类）+ `deploy/policy.rs`（授权决策表）+ `deploy/write.rs`（写入纪律原语）+ `deploy/ops.rs`（deploy/undeploy 执行）+ 单测 `deploy/tests.rs`（deploy 侧与共享设施）+ `deploy/tests_undeploy.rs`（undeploy 侧）。
 - **目标分类（§5.1）**：`classify_target` 基于 `symlink_metadata()`（lstat 语义），禁止 `is_dir()`；链接经 `read_link` + 双边 `canonicalize` 判定 `LinkToSource` / `ForeignLink`（悬空链接 canonicalize 失败 → ForeignLink，正确落表）；lstat Err 且 `exists()==false` → `Absent`（AppError 未保留 io ErrorKind，用 exists 兜底）。
 - **授权决策表（§5.2）**：`overwrite_authorized` 显式 16 臂 match（`RealDir × Recorded{mode:"symlink"}` 单列一臂）：Absent/LinkToSource 全策略放行；ForeignLink/RealDir/RealFile 仅 `UserConfirmed` 放行；`RealDir × Recorded{..}` 一律拒绝（"从中央库更新副本"属 UserConfirmed 领域，§5.2 括注）。附 `#[allow(clippy::match_same_arms)]`（重复 true/false 体是决策表本意）。
 - **写入纪律（§5.3）**：单目标三阶段——① 全部可失败重活先落在目标同父目录的 tmp（`.skillbox-deploy-<now_ms>-<SEQ>`，同父=同卷）上，旧目标零触动；② 旧目标整体 rename 进 `trash/<now_ms>/<basename>`（`-N` 防冲突，v1 无硬删除，跨卷直接报错且原路径不动）；③ 同卷原子 rename 提交；失败路径 tmp 清理 + trash 内容尽力回滚（双保险）。写盘前 `MuteGuard` RAII mute 文件监听，提前 return/出错保证成对。
 - **回退链（§5.2）**：symlink → junction（Windows）→ tracked copy；copy 必写 `.skillbox-source.json`（`SourceMarker { source, writtenAtMs }`）；junction 与 symlink 在 DB 语义上同记 Symlink 模式。
 - **全有或全无**：授权拒绝发生在任何写盘之前，全部冲突收集进一次 `AppError::target_conflict`（携带逐路径 `details.conflicts`，UI"指着目录说话"）；逐工具执行失败只影响该工具（`Failed{reason}`），报告仍 Ok 返回。
-- **undeploy**：precheck 只放行 `LinkToSource`（链接入 trash）与 `Absent`（`AlreadyAbsent` 幂等）；`RealDir`/`ForeignLink`/`RealFile` 一律 `TargetConflict` 拒绝（取消部署 ≠ 删除 Skill，§10）。`UndeployRequest.source` 用于判定"指向本源"。逐目标 io 失败 → `Failed{reason}`（与 deploy 对称，报告不丢其余目标结果）。
+- **执行期重分类（TOCTOU 防护，v2）**：deploy 与 undeploy 的执行阶段对每个目标重新 `classify_target`，绝不按 precheck 快照删除。deploy：现状超出授权 → `Failed{reason: state_changed ...}` 零写入（重试走完整 precheck 得到正确 TargetConflict），幂等判定（AlreadyUpToDate）也基于现状。undeploy：现状 ≠ precheck 预期 → `Skipped{reason:"state_changed"}`；目标已消失 → `Skipped{reason:"already_absent"}`（幂等终态，非失败）。
+- **undeploy 移除范围（v2）**：只移除指向本源的链接与 `.skillbox-source.json` 标记一致的 tracked-copy 副本（`is_our_copy` 只认磁盘标记，K4；用户在副本里的改动随副本整体进 trash 可找回）；`ForeignLink` / `RealFile` / 无标记 `RealDir` 一律 `TargetConflict` 拒绝（取消部署 ≠ 删除 Skill，§10）。`ToolUndeployOutcome` 改为 `Removed / Skipped{reason} / Failed{reason}`（reason 为稳定 token，IPC/前端可分组）。
 - **端口扩展**：ports 新增 `WatchMute` trait（mute/unmute 成对契约；v1 watcher 未实现，engine 经端口预留接入点）。
-- 单测 11 个（真实文件系统 tempfile + 固定时钟 + `FailWriteFs` 注入 write 失败 + `RecordingWatch` 计数）：**关键测试 `recorded_symlink_never_deletes_real_dir`**（DB 记 mode=symlink、磁盘是 RealDir → 断言 TargetConflict 且用户文件原样保留）、决策表 20 格逐格钉死、Absent 双模式部署、LinkToSource 幂等、ForeignLink 双策略、copy marker 内容、失败部署无部分写入且 tmp 清理、缺源 NotFound、undeploy 移除我方链接保留正本、undeploy 三态拒绝/幂等、mute/unmute 四路径（成功/幂等/失败/冲突）成对。
+- 单测 14 个（真实文件系统 tempfile + 固定时钟 + `FailWriteFs` 注入 write 失败 + `RecordingWatch` 计数 + `SwapAfterPrecheckFs` 竞态注入）：**关键测试 `recorded_symlink_never_deletes_real_dir`**（DB 记 mode=symlink、磁盘是 RealDir → 断言 TargetConflict 且用户文件原样保留）、决策表 20 格逐格钉死、Absent 双模式部署、LinkToSource 幂等、ForeignLink 双策略、copy marker 内容、失败部署无部分写入且 tmp 清理、缺源 NotFound、mute/unmute 四路径（成功/幂等/失败/冲突）成对；undeploy 侧：移除我方链接保留正本、三态拒绝/幂等、**TOCTOU 竞态**（`SwapAfterPrecheckFs` 在第 2 次分类时把链接偷换成带用户数据的真实目录 → 断言 `Skipped{state_changed}`、目录原样、trash 空）、**带标记副本含用户改动整体进 trash 可找回**、**无标记 / 伪造标记（source 指向别的 skill）真实目录拒绝且原样保留**。
 - 外源链接测试构造：Windows 用 junction（无权限要求），Unix 用 symlink——测试不依赖开发者模式，链接断言全部走 canonicalize 等价，平台无关。
 
 没做：
@@ -23,11 +24,11 @@
 - `ToolDeployOutcome::NeedsConfirmation` 变体保留给 IPC 层转换（deploy 内部以 `TargetConflict` 错误整体表达拒绝，未构造该变体）。
 
 自检输出（真实结果）：
-1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 8.84s`，EXIT=0，零警告
-2. `cargo test --workspace` → EXIT=0；63 passed / 0 failed（adapters 23、domain 6、engine 22=scan 11+deploy 11、ports 5、store 7）
+1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 3.46s`，EXIT=0，零警告
+2. `cargo test --workspace` → EXIT=0；66 passed / 0 failed（adapters 23、domain 6、engine 25=scan 11+deploy 14、ports 5、store 7）
 3. `git grep "tauri::" -- "*.rs" (排除 ipc/app)` → 0 匹配
 4. `git grep "skillbox-store" -- crates/ports/Cargo.toml` → 无匹配（§2.5 同层边守卫）
-5. 最大源文件 deploy.rs 466 行 ≤ 600；deploy/tests.rs 403 行
+5. 全部源文件 ≤ 600 行（deploy 拆分后：deploy.rs 150 / classify 71 / policy 43 / write 130 / ops 268 / tests 405 / tests_undeploy 209）
 6. `cargo build --release --workspace` → `target/release/skillbox-app.exe` 5.87 MB ≤ 12 MB（与 Step 1-3 持平）
 
 遗留风险 / 备案：
@@ -36,6 +37,7 @@
 - Windows 无开发者模式环境（本机即此）回退 junction 已被全部测试真实覆盖；有开发者模式时走 symlink，两者分类与回退结果一致（测试断言平台无关）。
 - `cleanup_tmp` 的 `remove_dir_all` 只作用于我们自己生成的 `.skillbox-deploy-` 前缀 tmp 路径，不触及用户数据；链接 tmp 走 `remove_link`。
 - 多目标重复路径、并发 deploy 同目标：v1 未定义（单进程 IPC 串行调用，先不设防）。
+- TOCTOU 重分类把窗口收窄到"单目标分类→同卷原子 rename"毫秒级，但不承诺原子性；竞态残留由 reconcile/doctor 兜底（K4）。
 
 ## Step 3 有界增量扫描引擎
 

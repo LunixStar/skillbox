@@ -1,9 +1,11 @@
-//! deploy / undeploy 单测：真实文件系统（tempfile）+ 固定时钟 + 注入失败点。
+//! deploy 单测：真实文件系统（tempfile）+ 固定时钟 + 注入失败点。
 //!
 //! 覆盖 §5 全部硬约束，重点是：
 //! - [`recorded_symlink_never_deletes_real_dir`]（关键测试）：DB 记录只
 //!   代表历史意图，绝不授权删除磁盘上的真实目录（§5.2 硬约束）。
 //! - 写入原子性：失败路径不留下部分写入的目标、tmp 清理干净（§5.3）。
+//!
+//! undeploy 单测见 `deploy/tests_undeploy.rs`（共享本文件的测试设施）。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -16,14 +18,14 @@ use skillbox_ports::{
     Clock, EntryMeta, FileSystem, ProdFileSystem, ProdLinker, WatchMute,
 };
 
-use super::{
-    deploy, undeploy, overwrite_authorized, DeployRequest, DeployTarget, SourceMarker,
-    UndeployRequest, UndeployTarget, ToolDeployOutcome, ToolUndeployOutcome,
-    SOURCE_MARKER_FILE,
-};
+use super::classify::{SourceMarker, SOURCE_MARKER_FILE};
+use super::policy::overwrite_authorized;
+use super::{deploy, DeployRequest, DeployTarget, UndeployRequest, UndeployTarget};
+
+use crate::types::ToolDeployOutcome;
 
 /// 固定时钟：trash 槽位 / marker 时间戳确定可断言。
-const NOW_MS: i64 = 1_700_000_000_000;
+pub(super) const NOW_MS: i64 = 1_700_000_000_000;
 
 struct FixedClock;
 
@@ -33,17 +35,17 @@ impl Clock for FixedClock {
     }
 }
 
-struct TestEnv {
-    root: tempfile::TempDir,
-    source: PathBuf,
-    agent_a: PathBuf,
-    trash: PathBuf,
-    fs: Arc<dyn FileSystem>,
-    clock: Arc<dyn Clock>,
-    linker: Arc<dyn skillbox_ports::Linker>,
+pub(super) struct TestEnv {
+    pub(super) root: tempfile::TempDir,
+    pub(super) source: PathBuf,
+    pub(super) agent_a: PathBuf,
+    pub(super) trash: PathBuf,
+    pub(super) fs: Arc<dyn FileSystem>,
+    pub(super) clock: Arc<dyn Clock>,
+    pub(super) linker: Arc<dyn skillbox_ports::Linker>,
 }
 
-fn setup_env() -> TestEnv {
+pub(super) fn setup_env() -> TestEnv {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("central").join("skill-a");
     std::fs::create_dir_all(&source).unwrap();
@@ -66,11 +68,11 @@ fn setup_env() -> TestEnv {
 
 impl TestEnv {
     /// 任意 agent 的目标路径（`agents/<agent>/skills/skill-a`）。
-    fn target_path(&self, agent: &str) -> PathBuf {
+    pub(super) fn target_path(&self, agent: &str) -> PathBuf {
         self.root.path().join("agents").join(agent).join("skills").join("skill-a")
     }
 
-    fn deploy_req<'a>(
+    pub(super) fn deploy_req<'a>(
         &self,
         policy: ReplacePolicy<'a>,
         targets: Vec<DeployTarget>,
@@ -88,7 +90,7 @@ impl TestEnv {
         }
     }
 
-    fn undeploy_req(&self, targets: Vec<UndeployTarget>) -> UndeployRequest {
+    pub(super) fn undeploy_req(&self, targets: Vec<UndeployTarget>) -> UndeployRequest {
         UndeployRequest {
             skill_id: SkillId(7),
             source: self.source.clone(),
@@ -103,7 +105,7 @@ impl TestEnv {
 }
 
 /// 链接模式目标（Symlink = 链接优先 + 回退链）。
-fn dt(env: &TestEnv, agent: &str) -> DeployTarget {
+pub(super) fn dt(env: &TestEnv, agent: &str) -> DeployTarget {
     DeployTarget {
         tool_id: ToolId(agent.into()),
         path: env.target_path(agent),
@@ -112,7 +114,7 @@ fn dt(env: &TestEnv, agent: &str) -> DeployTarget {
 }
 
 /// 副本模式目标。
-fn dt_copy(env: &TestEnv, agent: &str) -> DeployTarget {
+pub(super) fn dt_copy(env: &TestEnv, agent: &str) -> DeployTarget {
     DeployTarget {
         tool_id: ToolId(agent.into()),
         path: env.target_path(agent),
@@ -120,12 +122,12 @@ fn dt_copy(env: &TestEnv, agent: &str) -> DeployTarget {
     }
 }
 
-fn ut(env: &TestEnv, agent: &str) -> UndeployTarget {
+pub(super) fn ut(env: &TestEnv, agent: &str) -> UndeployTarget {
     UndeployTarget { tool_id: ToolId(agent.into()), path: env.target_path(agent) }
 }
 
 /// 构造"别人的链接"：Windows 用 junction（无权限要求），Unix 用 symlink。
-fn make_foreign_link(env: &TestEnv, link: &Path) {
+pub(super) fn make_foreign_link(env: &TestEnv, link: &Path) {
     std::fs::create_dir_all(link.parent().unwrap()).unwrap();
     let elsewhere = env.root.path().join("elsewhere");
     std::fs::create_dir_all(&elsewhere).unwrap();
@@ -445,48 +447,5 @@ fn deploy_mutes_and_unmutes_watcher_balanced() {
 }
 
 // ---------------------------------------------------------------------------
-// undeploy
+// undeploy 单测已按 600 行红线拆至 `deploy/tests_undeploy.rs`
 // ---------------------------------------------------------------------------
-
-#[test]
-fn undeploy_removes_our_link_and_keeps_source() {
-    let env = setup_env();
-    deploy(env.deploy_req(ReplacePolicy::NoClobber, vec![dt(&env, "agentA")])).unwrap();
-
-    let report = undeploy(env.undeploy_req(vec![ut(&env, "agentA")])).unwrap();
-    assert_eq!(report.results.len(), 1);
-    assert_eq!(report.results[0].outcome, ToolUndeployOutcome::Removed);
-    assert!(!env.target_path("agentA").exists(), "链接必须已移除");
-    // 正本仍在中央库（取消部署 ≠ 删除 Skill，§10）。
-    assert!(env.source.join("SKILL.md").exists());
-    assert!(env.source.join("run.sh").exists());
-    // 移除的链接在 trash 可找回。
-    assert!(env.trash.join(NOW_MS.to_string()).join("skill-a").exists());
-}
-
-#[test]
-fn undeploy_rejects_real_dir_and_foreign_link_and_reports_absent() {
-    let env = setup_env();
-
-    // 真实目录：拒绝且原样保留。
-    let real = env.target_path("agentA");
-    std::fs::create_dir_all(&real).unwrap();
-    std::fs::write(real.join("mine.txt"), b"keep").unwrap();
-    let err = undeploy(env.undeploy_req(vec![ut(&env, "agentA")])).unwrap_err();
-    assert_eq!(err.kind, ErrorKind::TargetConflict);
-    assert!(real.join("mine.txt").exists(), "真实目录必须原样保留");
-
-    // 外源链接：拒绝且原样保留。
-    make_foreign_link(&env, &env.target_path("agentB"));
-    let err = undeploy(env.undeploy_req(vec![ut(&env, "agentB")])).unwrap_err();
-    assert_eq!(err.kind, ErrorKind::TargetConflict);
-    assert!(
-        env.target_path("agentB").join("not-ours.txt").exists(),
-        "外源链接必须原样保留"
-    );
-
-    // 本就不存在：AlreadyAbsent（幂等成功，非错误）。
-    std::fs::remove_dir_all(&real).unwrap();
-    let report = undeploy(env.undeploy_req(vec![ut(&env, "agentA")])).unwrap();
-    assert_eq!(report.results[0].outcome, ToolUndeployOutcome::AlreadyAbsent);
-}
