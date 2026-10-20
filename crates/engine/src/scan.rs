@@ -39,9 +39,9 @@ use crate::types::{ScanProgress, ScanReport, ScanRequest, SkipReason, SkippedDir
 use crate::types::CancellationToken;
 
 /// skill 目录的标记文件名（大小写敏感匹配）。
-const SKILL_FILE: &str = "SKILL.md";
+pub(crate) const SKILL_FILE: &str = "SKILL.md";
 /// frontmatter 截断读取上限：8 KB（§7 约束 1）。
-const SKILL_HEAD_LIMIT: u64 = 8 * 1024;
+pub(crate) const SKILL_HEAD_LIMIT: u64 = 8 * 1024;
 /// 深度硬上限：请求 > 6 一律按 6 执行（§7 约束 2）。
 const MAX_DEPTH_CAP: u8 = 6;
 /// 进度节流：每处理 50 个目录 emit 一次（§7 约束 9）。
@@ -374,7 +374,7 @@ fn fingerprint_of(fs: &dyn FileSystem, dir: &Path, entries: &[EntryMeta]) -> Sca
 /// 输入为截断后的字节（≤ 8 KB，可能截在多字节字符中间——lossy 转换）。
 /// 仅接受 `---` 包裹的标准块；缺失 / 畸形按无元数据处理。
 /// 8 KB 处被截断（未闭合）时仍提取已见字段（frontmatter 不会超过 8 KB）。
-fn parse_frontmatter_head(bytes: &[u8]) -> (Option<String>, Option<String>) {
+pub(crate) fn parse_frontmatter_head(bytes: &[u8]) -> (Option<String>, Option<String>) {
     let text = String::from_utf8_lossy(bytes);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let mut lines = text.lines();

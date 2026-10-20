@@ -12,6 +12,9 @@
 //! - 所有 IO 经由 ports 注入（tmpfs + 假时钟可完整单测）。
 
 pub mod deploy;
+pub mod doctor;
+pub mod fix;
+pub mod reconcile;
 pub mod scan;
 pub mod types;
 
@@ -19,10 +22,16 @@ pub use deploy::{
     deploy, undeploy, DeployRequest, DeployTarget, ToolUndeployOutcome, ToolUndeployResult,
     UndeployReport, UndeployRequest, UndeployTarget,
 };
+pub use doctor::{doctor, DoctorOpts};
+pub use fix::{fix, FixRequest};
+pub use reconcile::reconcile;
 pub use scan::scan;
 pub use types::*;
 
-use skillbox_domain::{AppResult, ReplacePolicy, SkillId, ToolId};
+#[cfg(test)]
+mod test_env;
+
+use skillbox_domain::{AppResult, SkillId, ToolId};
 
 // ---------------------------------------------------------------------------
 // scan —— 扫描（§7）
@@ -34,45 +43,17 @@ use skillbox_domain::{AppResult, ReplacePolicy, SkillId, ToolId};
 // ---------------------------------------------------------------------------
 // reconcile —— 对账（§6）
 // ---------------------------------------------------------------------------
-
-/// 以磁盘为真相，将磁盘现状与 DB 索引比对，产出差异清单。
-///
-/// 契约：
-/// - 纯计算，不写盘、不修改 DB。
-/// - DB 索引只作为"上次意图"参与比对；任何 UI 状态必须由磁盘推算（K4）。
-/// - 覆盖 §6.2 全部 7 类差异：UnmanagedRealDir / BrokenLink / ForeignLink /
-///   MissingTarget / UnrecordedDeployment / CopyDrift / DuplicateName。
-pub fn reconcile(disk: &DiskView, index: &IndexView) -> Vec<Discrepancy> {
-    let _ = (disk, index);
-    todo!("Phase 1：实现 §6.2 七类差异的纯计算对账（engine/src/reconcile.rs）")
-}
+//
+// 实现见 `engine/src/reconcile.rs`（纯计算，不写盘）；
+// 单测见 `engine/src/reconcile/tests.rs`（覆盖 §6.2 全部 7 类差异）。
 
 // ---------------------------------------------------------------------------
 // doctor / fix —— 体检与修复（§6.3）
 // ---------------------------------------------------------------------------
-
-/// 体检：只读，可在任何时候安全运行；返回带 severity 的问题清单与建议动作。
-///
-/// 契约：
-/// - 绝不写盘；问题状态由磁盘 reconcile 推算，不读 DB 展示字段。
-/// - `opts.min_severity` 过滤严重度；`opts.tools` 限定工具范围。
-pub fn doctor(opts: DoctorOpts) -> AppResult<DoctorReport> {
-    let _ = &opts;
-    todo!("Phase 1：实现只读体检（engine/src/doctor.rs）")
-}
-
-/// 修复：接受**显式选中的问题 id 列表**，逐项执行，返回逐项结果。
-///
-/// 契约：
-/// - 【硬约束】禁止"一键修复全部"作为默认行为；危险项（涉及 `RealDir` /
-///   `ForeignLink`）必须逐个二次确认（`FixOutcome::NeedsConfirmation`）。
-/// - `policy` 同样受 §5.2 授权模型约束：`NoClobber` 下任何可能删除
-///   用户数据的操作必须拒绝。
-/// - 每个会删除的路径，删除前先进 `~/.skillbox/trash/` 暂存（§5.3）。
-pub fn fix(items: &[IssueId], policy: ReplacePolicy<'_>) -> AppResult<FixReport> {
-    let _ = (items, &policy);
-    todo!("Phase 1：实现逐项修复（engine/src/doctor.rs）")
-}
+//
+// 实现见 `engine/src/doctor.rs`（只读体检）与 `engine/src/fix.rs`（逐项修复，
+// 危险项逐个 NeedsConfirmation，删除先进 trash）；单测分别见
+// `engine/src/doctor/tests.rs` 与 `engine/src/fix/tests.rs`。
 
 // ---------------------------------------------------------------------------
 // install / deploy —— 入库与部署分离（K5）

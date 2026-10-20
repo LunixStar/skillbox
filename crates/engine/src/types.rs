@@ -2,7 +2,7 @@
 //!
 //! 这些类型同时是 IPC 序列化契约：全部 `#[serde(rename_all = "camelCase")]`（§8）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -200,8 +200,13 @@ pub struct DiskEntry {
     pub state: TargetState,
     /// 链接目标（`LinkToSource` / `ForeignLink` 时存在）。
     pub link_target: Option<PathBuf>,
-    /// 目标为真实目录时的指纹（CopyDrift 比对用）。
+    /// 链接是否悬空（目标不存在）。仅链接类条目有意义。
+    pub link_broken: bool,
+    /// 目标为真实目录时的指纹。
     pub fingerprint: Option<ScanFingerprint>,
+    /// 真实目录的递归内容哈希（排除我们的来源标记文件），
+    /// CopyDrift 与 `source_hash` 比对的唯一依据。
+    pub content_hash: Option<String>,
     /// 链接指向中央库时解析出的 skill id。
     pub source_skill_id: Option<SkillId>,
 }
@@ -210,8 +215,22 @@ pub struct DiskEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexView {
+    /// `skills` 表记录。
+    pub skills: Vec<SkillRecord>,
     /// `skill_targets` 表记录。
     pub records: Vec<TargetRecord>,
+}
+
+/// 中央库单个 skill 的索引行（`skills` 表）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillRecord {
+    pub id: SkillId,
+    pub name: String,
+    /// 中央库唯一正本路径（`~/.skillbox/skills/<name>`）。
+    pub canonical_path: PathBuf,
+    /// 正本内容哈希（与 `DiskEntry.content_hash` 同算法可比）。
+    pub content_hash: Option<String>,
 }
 
 /// 单条部署意图记录（`skill_targets` 行）。
@@ -288,6 +307,7 @@ pub enum SuggestedFix {
 #[serde(rename_all = "camelCase")]
 pub struct Discrepancy {
     pub kind: DiscrepancyKind,
+    pub severity: Severity,
     pub skill_id: Option<SkillId>,
     pub tool_id: Option<ToolId>,
     /// 主路径。
@@ -297,6 +317,24 @@ pub struct Discrepancy {
     /// 人可读说明。
     pub detail: String,
     pub suggested_fix: SuggestedFix,
+}
+
+impl Discrepancy {
+    /// 受影响的全部路径（主路径 + 相关路径）：doctor 展示与 fix 影响
+    /// 面预览共用。
+    pub fn affected_paths(&self) -> Vec<&Path> {
+        let mut paths = Vec::with_capacity(self.related.len() + 1);
+        paths.push(self.path.as_path());
+        paths.extend(self.related.iter().map(|p| p.as_path()));
+        paths
+    }
+
+    /// 稳定的问题 id（`kind:tool:path`）：同一磁盘现状产生同一 id。
+    /// fix 执行时重新推算差异并按 id 匹配——不信任 doctor 快照（K4）。
+    pub fn issue_id(&self) -> IssueId {
+        let tool = self.tool_id.as_ref().map(|t| t.0.as_str()).unwrap_or("-");
+        IssueId(format!("{}:{}:{}", self.kind.as_str(), tool, self.path.display()))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -316,16 +354,6 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueId(pub String);
-
-/// doctor 参数。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DoctorOpts {
-    /// 仅检查这些工具；None = 全部。
-    pub tools: Option<Vec<ToolId>>,
-    /// 只返回该严重度及以上的问题；None = 全部。
-    pub min_severity: Option<Severity>,
-}
 
 /// 单条体检问题。
 #[derive(Debug, Clone, Serialize, Deserialize)]

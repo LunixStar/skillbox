@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use skillbox_domain::{AppResult, ScanFingerprint};
+use skillbox_domain::{AppResult, ScanFingerprint, SkillId, SyncMode, ToolId};
 
 // ---------------------------------------------------------------------------
 // 共享数据结构
@@ -271,6 +271,138 @@ impl ScanCache for MemoryScanCache {
             .lock()
             .expect("MemoryScanCache poisoned")
             .insert(entry.path.clone(), entry.clone());
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IndexStore（§3.2 skills / skill_targets 写入端口）
+// ---------------------------------------------------------------------------
+
+/// 中央库索引写入端口（`skills` / `skill_targets` 两表的写入面）。
+///
+/// 读侧不设端口：调用方（ipc）直接查询 SQLite 组装 [`IndexView`] 快照
+/// 传入 engine；写入经由本端口，使 adopt / 补登记等流程可离线单测。
+/// SQLite 实现在 store crate（Phase 2 接线），测试用 [`MemoryIndexStore`]。
+pub trait IndexStore: Send + Sync {
+    /// 新增 skill 索引行，返回分配的 id。
+    /// `canonical_path` 冲突（UNIQUE）时返回 `Database` 错误。
+    fn insert_skill(
+        &self,
+        name: &str,
+        description: &str,
+        canonical_path: &Path,
+        content_hash: Option<&str>,
+    ) -> AppResult<SkillId>;
+
+    /// upsert `skill_targets`（UNIQUE(skill_id, tool_id)）：存在则整行
+    /// 刷新 path / mode / source_hash，不存在则插入。
+    fn upsert_target(
+        &self,
+        skill_id: SkillId,
+        tool_id: &ToolId,
+        path: &Path,
+        mode: SyncMode,
+        source_hash: Option<&str>,
+    ) -> AppResult<()>;
+}
+
+/// 内存索引行（`skills` 表）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredSkill {
+    pub id: SkillId,
+    pub name: String,
+    pub description: String,
+    pub canonical_path: PathBuf,
+    pub content_hash: Option<String>,
+}
+
+/// 内存索引行（`skill_targets` 表）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredTarget {
+    pub skill_id: SkillId,
+    pub tool_id: ToolId,
+    pub path: PathBuf,
+    pub mode: SyncMode,
+    pub source_hash: Option<String>,
+}
+
+/// 内存索引实现：测试注入与"无 DB"场景（id 从 1 顺序分配）。
+#[derive(Debug, Default)]
+pub struct MemoryIndexStore {
+    inner: Mutex<MemoryIndexState>,
+}
+
+#[derive(Debug, Default)]
+struct MemoryIndexState {
+    next_id: i64,
+    skills: Vec<StoredSkill>,
+    targets: Vec<StoredTarget>,
+}
+
+impl MemoryIndexStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 全部 skill 行（插入序）。
+    pub fn skills(&self) -> Vec<StoredSkill> {
+        self.inner.lock().expect("MemoryIndexStore poisoned").skills.clone()
+    }
+
+    /// 全部 target 行（插入序）。
+    pub fn targets(&self) -> Vec<StoredTarget> {
+        self.inner.lock().expect("MemoryIndexStore poisoned").targets.clone()
+    }
+}
+
+impl IndexStore for MemoryIndexStore {
+    fn insert_skill(
+        &self,
+        name: &str,
+        description: &str,
+        canonical_path: &Path,
+        content_hash: Option<&str>,
+    ) -> AppResult<SkillId> {
+        let mut st = self.inner.lock().expect("MemoryIndexStore poisoned");
+        if st.skills.iter().any(|s| s.canonical_path == canonical_path) {
+            return Err(skillbox_domain::AppError::database(format!(
+                "canonical_path 已存在: {}",
+                canonical_path.display()
+            )));
+        }
+        st.next_id += 1;
+        let id = SkillId(st.next_id);
+        st.skills.push(StoredSkill {
+            id,
+            name: name.to_string(),
+            description: description.to_string(),
+            canonical_path: canonical_path.to_path_buf(),
+            content_hash: content_hash.map(|h| h.to_string()),
+        });
+        Ok(id)
+    }
+
+    fn upsert_target(
+        &self,
+        skill_id: SkillId,
+        tool_id: &ToolId,
+        path: &Path,
+        mode: SyncMode,
+        source_hash: Option<&str>,
+    ) -> AppResult<()> {
+        let mut st = self.inner.lock().expect("MemoryIndexStore poisoned");
+        let row = StoredTarget {
+            skill_id,
+            tool_id: tool_id.clone(),
+            path: path.to_path_buf(),
+            mode,
+            source_hash: source_hash.map(|h| h.to_string()),
+        };
+        match st.targets.iter_mut().find(|t| t.skill_id == skill_id && t.tool_id == *tool_id) {
+            Some(existing) => *existing = row,
+            None => st.targets.push(row),
+        }
         Ok(())
     }
 }

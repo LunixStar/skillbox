@@ -31,10 +31,10 @@ use serde::{Deserialize, Serialize};
 use skillbox_domain::{ReplacePolicy, SkillId, SyncMode, ToolId};
 use skillbox_ports::{Clock, FileSystem, Linker, WatchMute};
 
-mod classify;
+pub(crate) mod classify;
 mod ops;
 mod policy;
-mod write;
+pub(crate) mod write;
 
 pub use ops::{deploy, undeploy};
 

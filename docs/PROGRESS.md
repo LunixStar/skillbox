@@ -1,5 +1,39 @@
 # SkillBox 开发进度
 
+## Step 5 磁盘优先：reconcile / doctor / fix（K4）
+
+状态：完成
+
+做了：
+- `engine::reconcile` / `engine::doctor` / `engine::fix` 全量实现，§6 硬约束落地（磁盘才是真相；UI 状态由磁盘推算，DB 索引只作"上次意图"比对）。文件拆分：`reconcile.rs`（256 行）+ `reconcile/tests.rs`（301）、`doctor.rs`（253）+ `doctor/tests.rs`（211）、`fix.rs`（551）+ `fix/tests.rs`（309）、共享测试设施 `test_env.rs`（230）。
+- **reconcile（§6.2 纯计算）**：覆盖全部 7 类差异，输出按 `(path, kind)` 排序确定性。BrokenLink 重建匹配三级（v3）：① 原始目标 == 索引正本路径；② 目标父目录 == 正本父目录且条目名 == skill 名（中央库名唯一，至多命中一个）；③ 均未命中 → RemoveLink（不猜测意图）。**DuplicateName 内容身份模型**：同一 skill 的部署（链接或 copy 副本）视为同一身份 `skill:{id}`（副本漂移由 CopyDrift 报告，不构成重名）；索引未知的条目回退内容比对——真实目录 → 递归内容哈希、链接 → 原始目标；同路径同时报 UnmanagedRealDir + DuplicateName（一个是"收编建议"、一个是"挑正本提示"，语义不冲突）。
+- **doctor（§6.3 只读体检）**：`inspect_disk`（pub(crate)，fix 复用）观察各工具 skills 根——真实目录算指纹 + 递归内容哈希；链接读原始目标 + 悬空标记，非悬空按解析目标归类（正本 → LinkToSource + skill id / 中央库内 → LinkToSource / 外部 → ForeignLink；悬空一律 ForeignLink + link_broken 交 reconcile 判定）。`hash_dir` 内容驱动（与 mtime 无关——`fs::copy` 不保留 mtime，副本与正本必须可比）：文件 1MB 上限近似哈希、根级 `.skillbox-source.json` 跳过、行排序后整体哈希。`tools` 过滤检查范围（未列出工具不检查、记录过滤，避免误报 MissingTarget；skills 永远保留），`min_severity` 过滤严重度；不存在的工具根跳过；`checked_tools` = 实际检查集。
+- **fix（§6.3 逐项修复）**：问题 id 稳定为 `kind:tool:path`；执行前重新 inspect + reconcile 按当前磁盘匹配（**不信任 doctor 快照**，K4）。【硬约束】无"一键修复全部"；`DuplicateName` 任何策略恒 `Skipped`（人工挑正本）。危险项（UnmanagedRealDir 收编 / ForeignLink·悬空链接移除 / CopyDrift 更新）逐个确认门：非 `UserConfirmed` → `NeedsConfirmation{reason: 影响面预览}`（即 dry-run），确认后放行。执行表：adopt（收编进中央库 + 原位放链接；frontmatter name 校验 `^[a-z0-9][a-z0-9-]{1,63}$`；失败回滚）→ rebuild_link（悬空无数据，先移 trash 再 NoClobber 提交，任何策略放行）→ redeploy（MissingTarget，无需确认——部署无破坏面）→ register_record（补登记）→ update_copy（重部署 copy 刷新 source_hash）。全部删除/替换先进 trash；执行期 TOCTOU 重分类（现状变化 → `Skipped{state_changed}`）；copy 相关动作无 IndexStore → `Skipped`（先写库后写盘的顺序要求）。
+- **端口扩展**：ports 新增 `IndexStore` trait（`insert_skill` / `upsert_target`，fix 补登记用）+ `MemoryIndexStore`（内存实现，单测用；`canonical_path` 唯一冲突 → `AppError::database`）。
+- **测试 34 个新增**（总 100）：reconcile 15（七类差异每类 ≥1 + 健康态零差异 + 确定性排序 + 身份规则）；doctor 6（**CountingFs 证明零写盘**、七类差异端到端一屏分类、min_severity / tools 过滤、幽灵工具根跳过、hash_dir 内容驱动与根标记跳过）；fix 13（**DuplicateName 确认后也跳过**、收编先确认后执行含 NoClobber dry-run 零写入与回滚断言、悬空重建任何策略、悬空/外部链接移除确认门、重部署免确认、copy 无库跳过、补登记、copy 漂移确认后更新且 doctor 复检干净、未知 id / 重复 id / **doctor 快照过期**（fix 用实时磁盘状态））。
+
+没做：
+- install / audit_skill / context_cost 仍为 todo!()（按步骤边界）。
+- **SQLite IndexStore 实现（store crate）**：端口与内存实现已就位，生产接线推迟到 Phase 2（ipc 层组装 `HealthContext` 时一并落地）；当前 fix 的 `index_store: None` 路径会 Skipped 相关动作（已被测试钉死，非静默错误）。
+- doctor/fix 与 adapters（目标路径解析）、store（索引快照来源）的生产接线：`HealthContext` 由调用方组装（ipc 层后续步骤）。
+- fix 执行后的"重扫校验"闭环（§6.1 链尾）：engine 侧由 doctor 复检测试覆盖，UI 侧闭环待 Phase 3。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 2.00s`，EXIT=0，零警告
+2. `cargo test --workspace` → EXIT=0；100 passed / 0 failed（adapters 23、domain 6、engine 59=scan 11+deploy 14+reconcile 15+doctor 6+fix 13、ports 5、store 7）
+3. `grep "tauri::"`（domain/ports/adapters/engine/store 全部源文件）→ 0 匹配
+4. `grep "skillbox-store" crates/ports/Cargo.toml` → 无匹配（§2.5 同层边守卫）
+5. 全部源文件 ≤ 600 行（新增最大 fix.rs 551；reconcile 256、doctor 253、test_env 230、各 tests ≤ 309）
+6. `cargo build --release -p skillbox-app` → `target/release/skillbox-app.exe` 5.87 MB ≤ 12 MB（与 Step 1-4 持平）
+
+遗留风险 / 备案：
+- broken_link 规则 ②（父目录 + basename 回退）依赖中央库名字唯一；正本同目录同名的极端冲突下取字典序第一（仅影响"建议"，不自动执行）。
+- `hash_dir` 对 >1MB 文件近似哈希（标记 approximated）：极端构造下 CopyDrift 理论上可漏报（近似前缀相同）；v1 取舍，接受。
+- doctor 对真实目录全量递归哈希，无指纹缓存对比：大 agent 目录（数千 skill）体检耗时未优化；v1 可接受（只读安全），后续可复用 ScanCache 指纹做增量。
+- `NeedsConfirmation.reason` 为影响面预览文本（人读），非结构化数据；UI 直接展示即可，不做解析依赖。
+- adopt 失败回滚链：收编 rename 成功但索引登记失败时目录留在中央库（doctor 会提示补登记，不丢数据）；回滚遇原位被占则保留中央库副本并 Failed 告知。
+- Windows 测试环境无开发者模式：链接走 junction 全覆盖（与 symlink 分类等价，Step 4 已验证）；悬空链接构造采用"先建目标再删除"避免 junction 指向不存在路径的平台差异。
+
 ## Step 4 链接部署与显式覆盖授权（v2 修订版）
 
 状态：完成（含 review 修订：undeploy 执行期重分类 / 标记副本移除 / Skipped 语义）
