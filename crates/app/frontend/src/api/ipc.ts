@@ -113,6 +113,72 @@ export type UpdateOutcome =
   | { unsupported: { reason: string } };
 
 // ---------------------------------------------------------------------------
+// 体检（doctor_run / doctor_fix；§6.2 七类差异）
+// ---------------------------------------------------------------------------
+
+export type Severity = "info" | "warning" | "critical";
+
+export type DiscrepancyKind =
+  | "unmanagedRealDir"
+  | "brokenLink"
+  | "foreignLink"
+  | "missingTarget"
+  | "unrecordedDeployment"
+  | "copyDrift"
+  | "duplicateName";
+
+export type SuggestedFix =
+  | "adopt"
+  | "rebuildLink"
+  | "removeLink"
+  | "redeploy"
+  | "registerRecord"
+  | "updateCopy"
+  | "convertToSymlink"
+  | "chooseCanonical"
+  | "manualReview";
+
+export interface Discrepancy {
+  kind: DiscrepancyKind;
+  severity: Severity;
+  skillId: number | null;
+  toolId: string | null;
+  path: string;
+  related: string[];
+  detail: string;
+  suggestedFix: SuggestedFix;
+}
+
+export interface DoctorIssue {
+  id: string;
+  severity: Severity;
+  discrepancy: Discrepancy;
+}
+
+export interface DoctorReport {
+  issues: DoctorIssue[];
+  checkedTools: string[];
+  durationMs: number;
+}
+
+/// serde 外部标签：`"applied"` / `{ "skipped": { "reason" } }` /
+/// `{ "failed": { "reason" } }` / `{ "needsConfirmation": { "reason" } }`。
+export type FixOutcome =
+  | "applied"
+  | { skipped: { reason: string } }
+  | { failed: { reason: string } }
+  | { needsConfirmation: { reason: string } };
+
+export interface FixResult {
+  issueId: string;
+  outcome: FixOutcome;
+}
+
+export interface FixReport {
+  results: FixResult[];
+}
+
+// ---------------------------------------------------------------------------
 // invoke 封装（仅本步骤 UI 用到的命令；全集见 dev/IPCTester）
 // ---------------------------------------------------------------------------
 
@@ -170,6 +236,18 @@ export function updatesCheck(skillId: number) {
 
 export function updatesApply(skillId: number, dryRun: boolean) {
   return invoke<UpdateOutcome>("updates_apply", { skillId, dryRun });
+}
+
+/// 体检（只读，任何时候可安全运行；§6.3）。
+export function doctorRun() {
+  return invoke<DoctorReport>("doctor_run", { tools: null, minSeverity: null });
+}
+
+/// 逐项修复：先 dry_run=true 预览影响清单（NeedsConfirmation.reason），
+/// 用户逐个确认后 confirmed=true + dry_run=false 执行（§6.3 硬约束：
+/// 危险项禁止批量、禁止"一键修复全部"作为默认行为）。
+export function doctorFix(opts: { items: string[]; confirmed: boolean; dryRun: boolean }) {
+  return invoke<FixReport>("doctor_fix", opts);
 }
 
 export function libraryGet(skillId: number) {

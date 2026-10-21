@@ -11,6 +11,8 @@ import {
 import {
   deployApply,
   deployRevoke,
+  doctorFix,
+  doctorRun,
   libraryDocRead,
   libraryInstallLocal,
   libraryList,
@@ -32,6 +34,8 @@ export const queryKeys = {
   tools: ["tools"] as const,
   library: ["library"] as const,
   targets: ["targets"] as const,
+  /// 体检报告（doctor 只读；修复成功后由页面失效重查）。
+  doctor: ["doctor"] as const,
   firstRunDone: ["settings", "firstRunDone"] as const,
   /// 详情页 SKILL.md 预览（按 skill id 缓存）。
   skillDoc: (skillId: number) => ["skillDoc", skillId] as const,
@@ -122,6 +126,29 @@ export function useCompleteFirstRun() {
 
 export function useOpenPath() {
   return useMutation({ mutationFn: (id: string) => systemOpenPath(id) });
+}
+
+// ---------------------------------------------------------------------------
+// 体检：doctor 只读查询 + 逐项修复（dry-run 预览 → 确认执行）
+// ---------------------------------------------------------------------------
+
+export function useDoctorReport() {
+  return useQuery({ queryKey: queryKeys.doctor, queryFn: doctorRun });
+}
+
+export function useDoctorFix() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { items: string[]; confirmed: boolean; dryRun: boolean }) => doctorFix(vars),
+    onSuccess: (_data, vars) => {
+      // 真实执行（非 dry-run）才失效库/部署/工具；dry-run 零写入无需刷新。
+      if (!vars.dryRun) {
+        void qc.invalidateQueries({ queryKey: queryKeys.library });
+        void qc.invalidateQueries({ queryKey: queryKeys.targets });
+        void qc.invalidateQueries({ queryKey: queryKeys.tools });
+      }
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------

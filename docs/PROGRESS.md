@@ -1,5 +1,39 @@
 # SkillBox 开发进度
 
+## Step 10 体检页：severity 分组 + 人话解释 + 逐项 dry-run 修复流
+
+状态：完成
+
+做了：
+- **纯前端步骤**（doctor_run / doctor_fix IPC 与引擎在 Step 5 已就位，命令总数 32 不变）：
+  - `api/ipc.ts`：补全体检类型镜像（`Severity` / `DiscrepancyKind` 七类 / `SuggestedFix` / `DoctorIssue` / `DoctorReport` / serde 外部标签 `FixOutcome` / `FixReport`）+ `doctorRun()` / `doctorFix({items,confirmed,dryRun})` 封装；`api/queries.ts`：`queryKeys.doctor` + `useDoctorReport()`（TanStack 自动挂载体检）+ `useDoctorFix()`（真实执行才失效 library/targets/tools，dry-run 零写入不刷）。
+- **体检页**（`pages/DoctorPage.tsx` 新文件，MainShell 替换占位）：
+  - **按 severity 三组**（严重问题 danger / 需要注意 blue / 提示 neutral），组内逐条卡片；空态「体检通过」、加载骨架屏、错误重试齐备。
+  - **人话解释**（不抛枚举名）：七类各自一句话，如 UnmanagedRealDir →「『Claude Code』目录里有一个不是 SkillBox 管理的文件夹，它可能是你自己放的」；MissingTarget →「记录里显示已部署，但磁盘上找不到」；DuplicateName →「多个目录里有同名但内容不同的 Skill」。
+  - **统一修复流（DoD：影响清单在修复前可见）**：每条问题独立按钮 → `doctor_fix(items=[单个id], dry_run=true)` → 弹层展示 NeedsConfirmation 影响清单（含"将影响以下路径"逐行列出）→ 用户确认 → `doctor_fix(items=[单个id], confirmed=true, dry_run=false)` → toast 逐项结果 + 自动重新体检。**无任何"一键修复全部"/批量按钮**。
+  - **危险项纪律**：UnmanagedRealDir（收编）/ ForeignLink（移除外来链接）/ CopyDrift（用正本更新副本）/ 悬空链接移除均标「危险项」徽章 + danger 按钮，逐个 dry-run → 逐个二次确认；每条确认弹层只含该条的影响路径。
+  - **DuplicateName 只提示不处理**：无修复按钮，仅「查看差异」弹层——列出全部冲突路径 + 明示"SkillBox 不会自动挑选正本，也不会改动这些目录"，提供「打开中央库」辅助人工比对。
+  - **顶部「重新体检」**（doctor 只读随时可安全重跑）+ 「上次体检时间」（TanStack `dataUpdatedAt`，页面显示）+ 已检查工具数/耗时。
+- IPCTester doctor 参数保持现有（doctor_run/doctor_fix 已在 32 命令全集内）。
+
+没做：
+- 体检结果的持久化快照（每次进页即时体检，无历史对比；v1 无此需求）。
+- 自动定时体检（v1 手动 + 进页自动触发即可）。
+
+自检输出（真实结果）：
+1. DoD-doctor 只读性：`doctor_is_read_only_zero_disk_writes`（engine/doctor/tests.rs:35，CountingFs 零写入证明，七类场景非空前提下断言）——本步未改引擎，测试原样通过
+2. DoD-危险项无法被批量修复：UI 无批量修复入口（仅逐条按钮）；每条修复调用 `items=[单个id]`；危险项确认弹层逐个出现；引擎侧 `confirm_gate` 未确认返回 NeedsConfirmation
+3. DoD-影响清单修复前可见：所有修复先 dry-run，弹层展示影响描述 + "将影响以下路径"逐行清单，确认后才执行
+4. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 1.16s`，零警告
+5. `cargo test --workspace` → 181 passed / 0 failed（adapters 23、domain 6、engine 130、ports 9、store 13）
+6. `npm run build` → 通过（7.19s）
+7. 核心五 crate `tauri::` grep → 0；全部 .rs ≤ 600 行；IPC 命令 32 = 上限
+8. `cargo build --release -p skillbox-app`（touch main.rs 强制嵌入新 dist）→ **7.5 MB ≤ 12 MB**（1m36s）；release exe 启动存活验证 → ALIVE（8 秒）后正常关闭
+
+遗留风险 / 备案：
+- 「上次体检时间」取自 TanStack `dataUpdatedAt`（会话内准确；应用重启后进页自动重新体检，时间随之刷新——不落库、不造假历史）。
+- 修复成功后自动 invalidate doctor 查询即重跑体检：问题场景大时可能有短暂加载骨架屏，属预期。
+
 ## Step 9 Skill 详情 / 溯源 / 更新 / 只读来源 + 工具页重排
 
 状态：完成

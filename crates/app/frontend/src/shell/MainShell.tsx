@@ -3,6 +3,7 @@
 import { useState } from "react";
 import DesignSystemPage from "../dev/DesignSystemPage";
 import IPCTester from "../dev/IPCTester";
+import DoctorPage from "../pages/DoctorPage";
 import LibraryPage from "../pages/LibraryPage";
 import OverviewPage from "../pages/OverviewPage";
 import PlaceholderPage from "../pages/PlaceholderPage";
@@ -10,11 +11,6 @@ import ToolsPage from "../pages/ToolsPage";
 import Sidebar, { type ShellView } from "./Sidebar";
 
 const PLACEHOLDERS: Partial<Record<ShellView, { title: string; description: string; phase: string }>> = {
-  doctor: {
-    title: "体检",
-    description: "对中央库与部署目标做一致性体检，发现漂移与损坏链接后给出修复建议。",
-    phase: "Phase 4",
-  },
   toolbox: {
     title: "工具箱",
     description: "安全扫描、上下文成本分析与日志 / 缓存管理。回收站恢复也在这里。",
@@ -37,7 +33,7 @@ export default function MainShell() {
         {view === "overview" && <OverviewPage onNavigate={setView} />}
         {view === "library" && <LibraryPage />}
         {view === "tools" && <ToolsPage />}
-        {view === "doctor" && <PlaceholderPage {...PLACEHOLDERS.doctor!} />}
+        {view === "doctor" && <DoctorPage />}
         {view === "toolbox" && <PlaceholderPage {...PLACEHOLDERS.toolbox!} />}
         {view === "settings" && <PlaceholderPage {...PLACEHOLDERS.settings!} />}
         {view === "design" && <DesignSystemPage />}
