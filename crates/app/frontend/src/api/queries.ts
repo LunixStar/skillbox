@@ -11,6 +11,7 @@ import {
 import {
   deployApply,
   deployRevoke,
+  costReport,
   doctorFix,
   doctorRun,
   libraryDocRead,
@@ -18,6 +19,8 @@ import {
   libraryList,
   libraryRemove,
   libraryTargets,
+  securityReport,
+  securityScan,
   settingsGet,
   settingsSet,
   systemOpenPath,
@@ -36,6 +39,12 @@ export const queryKeys = {
   targets: ["targets"] as const,
   /// 体检报告（doctor 只读；修复成功后由页面失效重查）。
   doctor: ["doctor"] as const,
+  /// 单个 skill 的安全扫描结果（后端另有缓存，扫描幂等且廉价）。
+  security: (skillId: number) => ["security", skillId] as const,
+  /// 全库安全概览（后端合并缓存）。
+  securityOverview: ["securityOverview"] as const,
+  /// 上下文成本报告（§9.2）。
+  cost: ["cost"] as const,
   firstRunDone: ["settings", "firstRunDone"] as const,
   /// 详情页 SKILL.md 预览（按 skill id 缓存）。
   skillDoc: (skillId: number) => ["skillDoc", skillId] as const,
@@ -178,5 +187,40 @@ export function useUpdateApply() {
       void qc.invalidateQueries({ queryKey: queryKeys.library });
       void qc.invalidateQueries({ queryKey: queryKeys.targets });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 专业面板（§9）：安全扫描（只提示不阻断）与上下文成本
+// ---------------------------------------------------------------------------
+
+/// 单个 skill 的安全扫描：打开卡片 / 详情页时懒加载触发，
+/// TanStack 缓存 + 后端缓存双保险，重复访问零额外开销。
+export function useSecurityReport(skillId: number) {
+  return useQuery({
+    queryKey: queryKeys.security(skillId),
+    queryFn: () => securityScan(skillId),
+    // 扫描是纯静态读取；会话内短时间内视为最新。
+    staleTime: 5 * 60_000,
+    enabled: Number.isFinite(skillId) && skillId > 0,
+  });
+}
+
+/// 全库安全概览（工具箱顶部徽章）。
+export function useSecurityOverview() {
+  return useQuery({
+    queryKey: queryKeys.securityOverview,
+    queryFn: securityReport,
+    // 部署 / 删除 / 更新会改变 skill 集合，统一在 mutation 成功后失效。
+    staleTime: 60_000,
+  });
+}
+
+/// 上下文成本报告（§9.2；估算值）。
+export function useCostReport() {
+  return useQuery({
+    queryKey: queryKeys.cost,
+    queryFn: costReport,
+    staleTime: 60_000,
   });
 }

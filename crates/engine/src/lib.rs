@@ -11,6 +11,8 @@
 //! - 依赖方向：只依赖 domain / ports / adapters / store，禁止依赖 ipc / app。
 //! - 所有 IO 经由 ports 注入（tmpfs + 假时钟可完整单测）。
 
+pub mod audit;
+pub mod cost;
 pub mod deploy;
 pub mod doctor;
 pub mod doc;
@@ -24,6 +26,8 @@ pub mod system;
 pub mod types;
 pub mod update;
 
+pub use audit::{audit_skill, AuditContext};
+pub use cost::{context_cost, CostSkill, CHARS_PER_TOKEN, CONFLICT_THRESHOLD};
 pub use deploy::{
     deploy, undeploy, DeployRequest, DeployTarget, ToolUndeployOutcome, ToolUndeployResult,
     UndeployReport, UndeployRequest, UndeployTarget,
@@ -59,8 +63,6 @@ pub use skillbox_adapters::{PathScope, ToolOverrides};
 
 #[cfg(test)]
 mod test_env;
-
-use skillbox_domain::{AppResult, SkillId, ToolId};
 
 // ---------------------------------------------------------------------------
 // scan —— 扫描（§7）
@@ -98,23 +100,10 @@ use skillbox_domain::{AppResult, SkillId, ToolId};
 // ---------------------------------------------------------------------------
 // 专业面板（§9）
 // ---------------------------------------------------------------------------
-
-/// 安全扫描：对单个 skill 做纯静态规则匹配（§9.1 八条规则）。
-///
-/// 契约：
-/// - 【硬约束】不得执行 skill 内任何脚本，纯静态文本匹配。
-/// - 只提示不阻断安装；`risk_level` 取命中的最高严重度。
-pub fn audit_skill(skill: SkillId) -> AppResult<SecurityReport> {
-    let _ = &skill;
-    todo!("Phase 4：实现八条静态安全规则（engine/src/audit.rs）")
-}
-
-/// 上下文成本：统计各已启用工具常驻 skill 的 description 成本与触发冲突。
-///
-/// 契约：
-/// - token 折算按 ~3.5 字符/token 估算，输出中明确标注。
-/// - 冲突检测：description 分词后两两 Jaccard ≥ 0.35 的组。
-pub fn context_cost(tools: &[ToolId]) -> AppResult<CostReport> {
-    let _ = tools;
-    todo!("Phase 4：实现上下文成本面板（engine/src/cost.rs）")
-}
+//
+// 安全扫描（§9.1 八条静态规则）见 `engine/src/audit.rs`：
+// 只注入 FileSystem / Linker 读取类端口，绝不执行 skill 脚本；
+// 硬约束证明（CountingFs 零写入 + bash -c 命中）见 `engine/src/audit/tests.rs`。
+//
+// 上下文成本（§9.2）见 `engine/src/cost.rs`：
+// ~3.5 字符/token 估算 + description 分词两两 Jaccard ≥ 0.35 冲突分组。

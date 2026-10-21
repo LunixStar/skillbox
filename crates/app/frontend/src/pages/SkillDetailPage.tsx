@@ -24,6 +24,7 @@ import {
   useDeployApply,
   useDeployRevoke,
   useOpenPath,
+  useSecurityReport,
   useSkillDoc,
   useTargets,
   useTools,
@@ -31,6 +32,7 @@ import {
   useUpdateCheck,
 } from "../api/queries";
 import { Markdown } from "../components/Markdown";
+import { FindingList, RiskBadge } from "../components/SecurityKit";
 import { useToast } from "../components/Toast";
 import { Badge, Button, EmptyState, Modal, Skeleton } from "../components/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -62,6 +64,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   const tools = useTools();
   const targets = useTargets();
   const doc = useSkillDoc(skill.id);
+  const security = useSecurityReport(skill.id);
   const check = useUpdateCheck();
   const apply = useUpdateApply();
   const deployApply = useDeployApply();
@@ -149,6 +152,35 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   // ------------------------------------------------------------------
   // 渲染
   // ------------------------------------------------------------------
+  /// 安全体检（§9.1）：打开详情页即扫描（纯静态，只提示不阻断安装）。
+  function renderSecurityCard() {
+    return (
+      <section className="sb-card p-4">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-ink">安全体检</h3>
+          {security.isLoading ? (
+            <Skeleton className="h-5 w-14 rounded-[6px]" />
+          ) : (
+            <RiskBadge level={security.data?.riskLevel} scanned={!!security.data} />
+          )}
+        </div>
+        <div className="mt-2">
+          {security.isLoading ? (
+            <div className="space-y-2">
+              {[0, 1].map((i) => (
+                <Skeleton key={i} className="h-10 w-full rounded-[8px]" />
+              ))}
+            </div>
+          ) : security.isError ? (
+            <p className="text-xs leading-5 text-danger">扫描失败：{ipcError(security.error)}</p>
+          ) : (
+            <FindingList findings={security.data?.findings ?? []} />
+          )}
+        </div>
+      </section>
+    );
+  }
+
   function renderUpdateCard() {
     return (
       <section className="sb-card p-4">
@@ -276,7 +308,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
           <div className="flex flex-wrap items-center gap-1.5">
             <h2 className="truncate text-base font-semibold text-ink">{skill.name}</h2>
             <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
-            <Badge tone="neutral">未体检</Badge>
+            <RiskBadge level={security.data?.riskLevel} scanned={!!security.data} />
             {readOnly && <Badge tone="danger" dot>只读来源</Badge>}
           </div>
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-ink-secondary">
@@ -361,6 +393,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
           </section>
 
           {renderUpdateCard()}
+          {renderSecurityCard()}
           {renderDeployCard()}
         </div>
       </div>

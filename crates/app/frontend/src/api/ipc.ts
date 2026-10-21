@@ -179,6 +179,56 @@ export interface FixReport {
 }
 
 // ---------------------------------------------------------------------------
+// 专业面板（security_scan / security_report / cost_report；§9.1 / §9.2）
+// ---------------------------------------------------------------------------
+
+export type RiskLevel = "low" | "medium" | "high";
+
+/// §9.1 八条静态规则之一命中。
+export interface SecurityFinding {
+  /// shell_exec / network_egress / credential_access / path_traversal /
+  /// obfuscation / symlink_escape / hidden_files / excessive_scope。
+  ruleId: string;
+  severity: Severity;
+  /// 相对 skill 根的路径。
+  file: string;
+  /// 行号；0 = 不适用。
+  line: number;
+  snippet: string;
+  advice: string;
+}
+
+export interface SecurityReport {
+  riskLevel: RiskLevel;
+  findings: SecurityFinding[];
+}
+
+export interface ToolCost {
+  toolId: string;
+  skillCount: number;
+  descriptionChars: number;
+  /// ~3.5 字符/token 折算（估算值，UI 必须标注）。
+  estimatedTokens: number;
+}
+
+export interface ConflictMember {
+  skillId: number;
+  name: string;
+  toolId: string;
+}
+
+export interface ConflictGroup {
+  members: ConflictMember[];
+  keywords: string[];
+  similarity: number;
+}
+
+export interface CostReport {
+  perTool: ToolCost[];
+  conflicts: ConflictGroup[];
+}
+
+// ---------------------------------------------------------------------------
 // invoke 封装（仅本步骤 UI 用到的命令；全集见 dev/IPCTester）
 // ---------------------------------------------------------------------------
 
@@ -273,6 +323,18 @@ export function settingsSet(opts: { key: string; value: string; dryRun: boolean 
 export function systemOpenPath(id: string) {
   return invoke<unknown>("system_open_path", { id });
 }
+
+/// 单个 skill 的纯静态安全扫描（§9.1；结果同时缓存在后端，
+/// `security_report` 汇总读取）。
+export function securityScan(skillId: number) {
+  return invoke<SecurityReport>("security_scan", { skillId });
+}
+
+/// 全库安全概览（合并后端缓存的各 skill 扫描结果）。
+export const securityReport = () => invoke<SecurityReport>("security_report");
+
+/// 上下文成本报告（§9.2；token 为 ~3.5 字符/token 估算值）。
+export const costReport = () => invoke<CostReport>("cost_report");
 
 /// §4.3 只读来源判定（前端侧）：正本位于任一工具的插件缓存
 /// （extra_scan_dirs）内 → 只读，不可部署（后端另有硬守卫）。

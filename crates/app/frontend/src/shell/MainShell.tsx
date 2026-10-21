@@ -7,15 +7,11 @@ import DoctorPage from "../pages/DoctorPage";
 import LibraryPage from "../pages/LibraryPage";
 import OverviewPage from "../pages/OverviewPage";
 import PlaceholderPage from "../pages/PlaceholderPage";
+import ToolboxPage from "../pages/ToolboxPage";
 import ToolsPage from "../pages/ToolsPage";
 import Sidebar, { type ShellView } from "./Sidebar";
 
 const PLACEHOLDERS: Partial<Record<ShellView, { title: string; description: string; phase: string }>> = {
-  toolbox: {
-    title: "工具箱",
-    description: "安全扫描、上下文成本分析与日志 / 缓存管理。回收站恢复也在这里。",
-    phase: "Phase 4",
-  },
   settings: {
     title: "设置",
     description: "中央库位置、扫描黑名单、语言等应用设置。",
@@ -34,7 +30,7 @@ export default function MainShell() {
         {view === "library" && <LibraryPage />}
         {view === "tools" && <ToolsPage />}
         {view === "doctor" && <DoctorPage />}
-        {view === "toolbox" && <PlaceholderPage {...PLACEHOLDERS.toolbox!} />}
+        {view === "toolbox" && <ToolboxPage />}
         {view === "settings" && <PlaceholderPage {...PLACEHOLDERS.settings!} />}
         {view === "design" && <DesignSystemPage />}
         {view === "dev" && <IPCTester />}

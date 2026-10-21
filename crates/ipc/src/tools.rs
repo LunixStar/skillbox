@@ -21,7 +21,8 @@ pub struct ToolDto {
     pub enabled: bool,
 }
 
-fn env_snapshot(state: &AppState) -> Vec<ToolInfo> {
+/// 环境快照（tools_list 与 cost_report 的启用工具集合共用）。
+pub(crate) fn env_snapshot(state: &AppState) -> Vec<ToolInfo> {
     env_tools(state.fs.as_ref(), &PathScope::current(), &ToolOverrides::new())
 }
 

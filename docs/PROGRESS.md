@@ -1,5 +1,54 @@
 # SkillBox 开发进度
 
+## Step 11 安全扫描（§9.1 八条静态规则）+ 上下文成本面板（§9.2）
+
+状态：完成
+
+做了：
+- **后端——安全扫描引擎**（`engine/src/audit.rs` 新文件 + `audit/tests.rs` 13 测试）：
+  - `AuditContext{fs, linker}`：**只注入读取类端口**——这是"无子进程"硬约束的结构性保证（引擎依赖图中不存在可被 skill 触达的执行面）；`audit_skill(ctx, root) → SecurityReport{risk_level, findings}`。
+  - **八条纯静态规则**（只提示不阻断安装）：shell_exec(Warning) / network_egress(Info) / credential_access(Critical) / path_traversal(Warning) / obfuscation(Critical) / symlink_escape(Critical) / hidden_files(Info) / excessive_scope(Warning)；risk_level = 命中最高严重度（High/Medium/Low）。
+  - 规则要点：联网命令（curl/wget/requests 等）任何文件标记，裸 URL 仅非 markdown（文档引用不算）；`.env` 词边界判定（`.environment` 不误报）；`process.env` + 敏感词组合；超长十六进制串 ≥32 字符判混淆；隐藏文件/目录标记但不递归（`.git` 内部不参与内容规则）；node_modules 不递归；链接（含 Windows junction）一律不跟随、读目标判越界；SKILL.md frontmatter `tools`/`permissions` 含 `*`/all 判过宽。
+  - 防御性上限：深度 ≤6、文件数 ≤400、单文件 ≤512KB；目录读取/解码失败静默跳过。
+  - **【硬约束证明】**`audit_is_pure_static_zero_writes_and_flags_shell_exec`：CountingFs（计数全部变更类端口调用）包裹真实文件系统，含 `bash -c` + `curl | bash` 的假 skill → shell_exec 命中且写入计数 == 0（纯静态读取，无子进程可 spawn）。
+- **后端——上下文成本引擎**（`engine/src/cost.rs` 新文件，8 内嵌测试）：
+  - `context_cost(skills, targets, enabled_tools) → CostReport{per_tool, conflicts}`：逐启用工具统计常驻 skill 数 + description 字符数，**~3.5 字符/token 折算（`CHARS_PER_TOKEN`，估算值）**。
+  - 冲突检测：description 分词（小写 ASCII 字母数字段 ≥2 字符 + 中文逐字）→ 两两 Jaccard ≥ 0.35（`CONFLICT_THRESHOLD`）→ 连通分量成组（A~B、B~C 传递同组）；keywords = 全员交集（空则退化 ≥2 成员高频词，截 8）；similarity = 组内最大两两 Jaccard。
+- **后端——IPC 实装**（复用既有 3 个占位命令槽位，命令总数 32 不变）：
+  - `security_scan(skillId)`：store.get_skill → audit → 结果缓存进 `AppState.security_cache`（Mutex<HashMap<SkillId, SecurityReport>>）。
+  - `security_report()`：合并缓存（risk 取最高、findings 合并）→ 工具箱总览。
+  - `cost_report()`：DB 快照（list_skills/list_targets）+ env_snapshot 过滤已启用工具 → context_cost。
+  - state.rs 增 `put_security_report` / `security_overview`；tools.rs `env_snapshot` 改 pub(crate) 供 cost_report 复用。
+- **前端**：
+  - `api/ipc.ts`：SecurityFinding/SecurityReport/RiskLevel/ToolCost/ConflictMember/ConflictGroup/CostReport 类型镜像 + securityScan/securityReport/costReport 封装；`api/queries.ts`：queryKeys.security(skillId)/securityOverview/cost + useSecurityReport（staleTime 5min，懒挂载触发）/useSecurityOverview/useCostReport。
+  - `components/SecurityKit.tsx`（新）：八条规则人话标签、RiskBadge（低/中/高风险/未体检）、FindingList（规则·严重度·位置·片段·建议）——库页/详情页/工具箱三处共用。
+  - **工具箱页**（`pages/ToolboxPage.tsx` 新文件，MainShell 替换占位）：
+    - 安全扫描区：总体风险徽章 +「全部体检」按钮（逐 skill 顺序扫描 + 进度）+ 逐 skill 行（徽章 + 发现数，点击展开明细）。
+    - 上下文成本区：数字卡片（常驻 skill 总数 / 估算 token，标注"估算值 ~3.5 字符/token"）+ 按工具**纯 CSS 条形图**（width % 相对最大值，无图表库）+ 冲突风险组卡片（相似度 % + 重叠关键词 Tag + 成员列表 + **一键停用** = deploy_revoke(skillId,[toolId])）。
+  - **SkillDetailPage**：右列新增「安全体检」卡（打开即扫描，FindingList 逐条列出发现与建议）；头部徽章从「未体检」占位升级为真实风险徽章。
+  - **LibraryPage**：卡片/行风险徽章（CardRiskBadge 挂载即触发扫描，TanStack + 后端双缓存幂等廉价）。
+- 布局遵守 §11.3：专业面板全部收进侧栏「工具箱」，主界面（库/工具/体检）不受污染。
+
+没做：
+- 安全扫描的定时/后台自动重扫（v1 进页/开卡懒触发 + 手动「全部体检」即可）。
+- 日志导出、缓存/回收站管理 UI（IPC 已有，界面留工具箱后续步骤）。
+- 标签编辑、设置页。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 4.37s`，零警告
+2. `cargo test --workspace` → 202 passed / 0 failed（adapters 23、domain 6、engine 151、ports 9、store 13；新增 audit 13 + cost 8）
+3. `npm run build`（tsc --noEmit + vite）→ 通过（1.97s，2021 modules）
+4. 核心五 crate（domain/ports/adapters/engine/store）`tauri::` grep → 0
+5. 全部 .rs ≤ 600 行（57 文件；audit.rs 362 / audit/tests.rs 262 / cost.rs 340）
+6. IPC 命令 32 个 = §8 上限（security_scan/security_report/cost_report 为既有槽位实装，无新增）
+7. `cargo build --release -p skillbox-app`（touch main.rs 强制嵌入新 dist）→ **7.60 MB ≤ 12 MB**（1m49s）
+8. release exe 启动存活验证 → ALIVE（pid=33188，6 秒）后正常关闭
+
+遗留风险 / 备案：
+- 库页网格视图所有卡片挂载即触发扫描：skill 数量大时首开有一批 IPC 调用（纯静态读取、后端缓存，实测廉价；列表视图 VirtualList 懒挂载天然限流）。
+- security_report 总览依赖后端缓存（应用重启后为空），工具箱「全部体检」可主动补全——诚实显示「还没有已汇总的发现」而非造假数据。
+- 静态规则有保守取向的误报可能（如正文中的 `sh -c` 示例文本）；只提示不阻断，snippet + advice 引导人工判断。
+
 ## Step 10 体检页：severity 分组 + 人话解释 + 逐项 dry-run 修复流
 
 状态：完成

@@ -3,13 +3,14 @@
 //! 命令 = 读 state → 组装 engine 上下文 → 调 engine。端口实例（fs / clock /
 //! linker / hasher / git）在 init 时创建一次，此后只读共享。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use skillbox_domain::{AppError, AppResult, ToolId};
+use skillbox_domain::{AppError, AppResult, SkillId, ToolId};
 use skillbox_engine::{
-    CancellationToken, HealthContextInputs, IndexView, InstallContext, OpsContext, ScanReport,
-    SkillRecord, TargetRecord, UpdateContext,
+    CancellationToken, HealthContextInputs, IndexView, InstallContext, OpsContext, RiskLevel,
+    ScanReport, SecurityReport, SkillRecord, TargetRecord, UpdateContext,
 };
 use skillbox_ports::{
     Clock, FileSystem, GitClient, Hasher, IndexStore, Linker, ProdClock, ProdFileSystem,
@@ -47,6 +48,9 @@ pub struct AppState {
     pub git: Arc<dyn GitClient>,
     /// 扫描会话（单活动实例）。
     pub scan: Arc<Mutex<ScanSession>>,
+    /// 安全扫描结果缓存（skill → 最近一次报告；`security_scan` 写入，
+    /// `security_report` 汇总读取）。
+    pub security_cache: Arc<Mutex<HashMap<SkillId, SecurityReport>>>,
 }
 
 impl AppState {
@@ -67,6 +71,7 @@ impl AppState {
             hasher: Arc::new(ProdHasher),
             git: Arc::new(ProdGitClient),
             scan: Arc::new(Mutex::new(ScanSession::default())),
+            security_cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -172,6 +177,31 @@ impl AppState {
         let raw = serde_json::to_string(&ids.iter().map(|t| t.0.as_str()).collect::<Vec<_>>())
             .map_err(|e| AppError::internal(format!("序列化失败: {e}")))?;
         self.store.set_setting(DISABLED_TOOLS_KEY, &raw)
+    }
+
+    /// 缓存单个 skill 的安全扫描结果。
+    pub fn put_security_report(&self, id: SkillId, report: SecurityReport) {
+        self.security_cache
+            .lock()
+            .expect("security_cache poisoned")
+            .insert(id, report);
+    }
+
+    /// 全库安全概览：合并已扫描 skill 的缓存报告
+    /// （risk_level 取最高，findings 合并后按文件 / 行排序）。
+    pub fn security_overview(&self) -> SecurityReport {
+        let cache = self.security_cache.lock().expect("security_cache poisoned");
+        let mut risk_level = RiskLevel::Low;
+        let mut findings = Vec::new();
+        for report in cache.values() {
+            if report.risk_level > risk_level {
+                risk_level = report.risk_level;
+            }
+            findings.extend(report.findings.iter().cloned());
+        }
+        drop(cache);
+        findings.sort_by(|a, b| (&a.rule_id, &a.file, a.line).cmp(&(&b.rule_id, &b.file, b.line)));
+        SecurityReport { risk_level, findings }
     }
 }
 

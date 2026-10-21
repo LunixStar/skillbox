@@ -24,10 +24,12 @@ import {
   useInstallLocal,
   useLibrary,
   useRemoveSkill,
+  useSecurityReport,
   useTargets,
   useTools,
 } from "../api/queries";
 import VirtualList from "../components/VirtualList";
+import { RiskBadge } from "../components/SecurityKit";
 import { useToast } from "../components/Toast";
 import { Badge, Button, EmptyState, Modal, Skeleton } from "../components/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -51,6 +53,12 @@ const ORIGIN_LABEL: Record<SkillMeta["originKind"], string> = {
 
 function toolBadgeLabel(t: ToolDto): string {
   return (t.icon || t.displayName).slice(0, 2);
+}
+
+/// 卡片 / 行内的风险徽章：挂载即触发纯静态扫描（后端缓存，幂等廉价）。
+function CardRiskBadge({ skillId }: { skillId: number }) {
+  const security = useSecurityReport(skillId);
+  return <RiskBadge level={security.data?.riskLevel} scanned={!!security.data} />;
 }
 
 export default function LibraryPage() {
@@ -346,7 +354,7 @@ export default function LibraryPage() {
           <div className="flex shrink-0 items-center gap-1">
             <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
             {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">只读</Badge>}
-            <Badge tone="neutral">未体检</Badge>
+            <CardRiskBadge skillId={skill.id} />
           </div>
         </div>
         <p className="mt-1.5 line-clamp-2 min-h-8 text-xs leading-4 text-ink-secondary">
@@ -372,6 +380,7 @@ export default function LibraryPage() {
             <span className="truncate text-sm text-ink">{skill.name}</span>
             <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
             {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">只读</Badge>}
+            <CardRiskBadge skillId={skill.id} />
           </div>
           <div className="truncate text-xs text-ink-faint">{skill.description || skill.canonicalPath}</div>
         </div>
