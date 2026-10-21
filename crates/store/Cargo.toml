@@ -18,3 +18,7 @@ skillbox-ports = { workspace = true, features = [] }
 [[bench]]
 name = "db_cache_bench"
 harness = false
+
+[[bench]]
+name = "list_bench"
+harness = false

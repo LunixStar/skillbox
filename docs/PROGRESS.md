@@ -1,5 +1,67 @@
 # SkillBox 开发进度
 
+## Step 13 收尾（Phase 5 Final）：动画收尾 + 命令面板 Ctrl+K + dev 路由守卫 + §7.1 性能实测 + 交付文档
+
+状态：完成
+
+做了：
+- **动画收尾（§11.2）**：
+  - `index.css` reduced-motion 块补 `animation-delay: 0ms !important`——错峰入场在 reduced-motion 下彻底关闭。
+  - LibraryPage renderCard/renderRow、DoctorPage renderIssue 加 `sb-fade-up` + `--sb-i`（CSS `min()` 截断 10 项），列表 >300 行虚拟滚动（VirtualList）与弹层过渡（Modal sb-pop-enter / Drawer sb-fade-enter）此前已就位。
+- **命令面板 Ctrl+K（§11.3）**：`components/CommandPalette.tsx`（新，~470 行）：
+  - 覆盖全部无复杂参数 IPC 写操作：rescan（scan_start）/ scan_cancel / doctor 重跑 / 安全全扫（逐 skill securityScan）/ 打开中央库 / 切语言 / 登记本地目录（library_install_local keepInPlace 弹窗）/ 逐 skill 部署（deploy_apply）/ 撤销（deploy_revoke）/ 模式切换（deploy_set_mode，经 ipc.ts 新增 `deploySetMode` 直连封装）/ 删除（library_remove delete，**两段 Enter 确认**）/ 逐工具启停（tools_set_enabled）+ 6 视图导航。
+  - 键盘 ↑↓/Enter/Esc；过滤 label+group+keywords；渲染与导航共用 slice(0,50) 截断集；busy 态；危险命令 `confirmId` 二次 Enter（不引入 window.confirm）。
+  - **例外备案**（需页面上下文，保留原页面流）：doc_write（编辑器内容）、doctor_fix（dry-run 影响清单 + 逐项确认）、updates_apply（diff 确认）。
+  - MainShell 挂 `<CommandPalette>` + 全局 Ctrl+K/Cmd+K keydown 切换；palette.* 共 30 key 补入 zh-CN/en 两份 JSON。
+- **dev 路由守卫**：MainShell `const IS_DEV = import.meta.env.DEV`（Vite 静态替换）门控 design/dev 两视图渲染；Sidebar 加 `showDev` prop 门控开发者入口显示。release 构建下两页面**不可达**（备案：静态 import 仍在 bundle 内，tree-shake 需动态导入，v1 接受）。
+- **lint 接线**：`package.json` += `"lint": "node scripts/check-i18n.mjs && tsc --noEmit"`（check-i18n 正式进 lint 链）。
+- **§7.1 性能实测（docs/PERFORMANCE.md 全表真实数字）**：
+  - 新增 `crates/store/benches/list_bench.rs`：500 skill 灌库 + 20 轮 list_skills/serde 计时——**list 500 条命令体+序列化 min 0.49ms / avg 1.15ms**（预算 ≤50ms；invoke 信封未计，口径备案）。
+  - 重跑 scan_bench：5000 目录冷 124ms / 暖 99ms，RSS 增量 1544KB（预算 ≤60s / ≤80MB）。
+  - 重跑 db_cache_bench：5000 目录 DbCache 冷 163ms / 暖 105ms；20000 目录冷 1299ms。
+  - PowerShell 实测 release exe：冷启动（主窗口出现）首启 **1181ms** / 后续 216-254ms（预算 ≤1.5s）；空闲 RSS **26.8-30MB**（预算 ≤150MB）。
+  - release 体积 **7.60MB ≤ 12MB**；安装包 N/A（NSIS bundle 从未构建，如实记录）。
+- **交付文档**：
+  - `docs/adapters.md`（新）：19 工具全表（路径依据 / 全局-项目级对称性 / 平台差异 / extra_scan 只读目录 / 待复核清单）+ 解析规则 + 形态分组 + 链接能力回退链。
+  - `docs/security-rules.md`（新）：八条规则逐条匹配模式 + 严重度 + 误报说明 + 扫描上限 + risk level 汇总；「纯静态零执行」硬约束的结构性保证说明。
+
+自检输出（真实结果）：
+1. `npm run lint`（check-i18n + tsc）→ `zh=311 en=311 used=244 failures=0`
+2. `npm run build` → 通过（5.32s，2064 modules）
+3. `cargo clippy --workspace --all-targets -- -D warnings` → Finished in 1.07s，零警告
+4. `cargo test --workspace` → 205 passed / 0 failed（adapters 23、domain 6、engine 154、ports 9、store 13）
+5. 全部 .rs ≤ 600 行（59 文件，含新 list_bench.rs；0 超限）；全部 tsx/ts ≤ 600 行（39 文件，0 超限）
+6. 核心五 crate `tauri::` grep → 0；IPC 命令 32 个 = §8 上限；npm 依赖 8 个 ≤ 10
+7. touch main.rs + `cargo build --release -p skillbox-app` → **7.60 MB ≤ 12 MB**（1m27s）
+8. release exe 冷启动/RSS 三轮实测 → 1181/216/254ms，RSS 26.8-30MB（见 PERFORMANCE.md）
+
+遗留风险 / 备案：
+- 命令面板命令集随数据规模增长（每 skill 最多 2×工具数条命令）：>300 skill 时过滤前命令数大，但过滤/slice(0,50) 渲染有界，min/截断保证 UI 不卡。
+- palette 安全全扫为顺序 Promise.all（skill 极多时耗时），busy 态明示执行中；未做进度流（v1 接受）。
+- dev 页静态 import 进 release bundle（不可达但增大 JS ~几十 KB）；v2 可改动态 import() 彻底剔除。
+
+## 已知问题与未做事项（v1 收尾清单）
+
+已知问题（含误报/取舍，均不阻塞交付）：
+1. dev 页（DesignSystemPage/IPCTester）代码在 release bundle 内但运行时不可达（IS_DEV 守卫）；v2 动态 import 可剔除。
+2. check-i18n unused-key 告警（约 62 条 + palette 后新增）均为 Record 映射/三元假阳性，脚本只扫 `t("字面量")`。
+3. doc 校验误报情形（unclosed_fence 教学示例、missing_file 裸域名链接等）——Step 12 详列，告警级不阻断。
+4. 静态安全规则的保守误报（文档中 shell 示例文本等）——只提示不阻断，见 docs/security-rules.md 逐条说明。
+5. 前端只读来源判定为路径前缀匹配（体验层）；权威判定在后端 deploy 守卫。
+6. 扫描事件经 Tauri event 的重放窗口由 1.2s 轮询 scan_status 兜底。
+7. Windows 无开发者模式环境走 junction；有开发者模式时 symlink，两者分类等价（测试钉死）。
+8. hash_dir >1MB 文件近似哈希，极端构造下 CopyDrift 理论可漏报。
+
+未做事项（v2 候选，非 v1 承诺范围）：
+1. NSIS 安装包构建与体积实测（tauri.conf.json targets 已配 ["nsis"]，工具链未构建过）。
+2. 回收站恢复 UI、缓存管理 UI、日志导出 UI（IPC 均已有：trash_restore/cache_clear/system_logs_export）。
+3. 标签编辑（skill_tags 表无写入来源，标签过滤入口保留诚实空态）。
+4. 更新/体检的定时自动检查（v1 全手动触发，防后台惊喜）。
+5. WatchMute 真实文件监听（端口已预留）。
+6. adapters 表中标注【待复核】的路径核验（见 docs/adapters.md 待复核清单：codex/gemini_cli/qwen_code/grok/windsurf/trae/antigravity/crush/hermes 的 skills 子目录等）。
+7. 命令面板对 doc_write/doctor_fix/updates_apply 的覆盖（需页面上下文，保留原页面流，已备案）。
+8. 多窗口 / 多显示器适配（v1 单窗口）。
+
 ## Step 13 i18n（Phase 5）：自研 t() + zh-CN/en 双语 + 语言切换 + 设置页实装
 
 状态：完成

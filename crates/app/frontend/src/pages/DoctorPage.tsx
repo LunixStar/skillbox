@@ -2,7 +2,7 @@
 /// 逐项修复（先 dry-run 影响清单 → 逐个二次确认 → 执行）；
 /// 危险项无批量入口；DuplicateName 只提供"查看差异"，绝不代选正本。
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { AlertTriangle, CheckCircle2, Eye, FolderOpen, Info, RefreshCw, ShieldAlert } from "lucide-react";
 import {
   ipcError,
@@ -153,14 +153,14 @@ export default function DoctorPage() {
     );
   }
 
-  function renderIssue(issue: DoctorIssue) {
+  function renderIssue(issue: DoctorIssue, i: number) {
     const d = issue.discrepancy;
     const tool = d.toolId ? (toolName.get(d.toolId) ?? d.toolId) : null;
     const action = issueAction(issue);
     const dangerous = action !== null && "danger" in action && action.danger;
     const paths = [d.path, ...d.related];
     return (
-      <div key={issue.id} className="sb-card flex items-start gap-3 p-4">
+      <div key={issue.id} className="sb-card sb-fade-up flex items-start gap-3 p-4" style={{ "--sb-i": i } as CSSProperties}>
         <div
           className={`mt-0.5 shrink-0 ${d.severity === "critical" ? "text-danger" : "text-primary"}`}
         >

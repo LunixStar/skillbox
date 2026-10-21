@@ -51,6 +51,8 @@ const DEV_NAV: NavItem[] = [
 interface SidebarProps {
   view: ShellView;
   onSelect: (view: ShellView) => void;
+  /// dev 入口（设计系统 / IPC Tester）仅在 dev 构建可见（MainShell 路由守卫）。
+  showDev?: boolean;
 }
 
 function NavButton({ item, active, onSelect }: { item: NavItem; active: boolean; onSelect: () => void }) {
@@ -74,7 +76,7 @@ function NavButton({ item, active, onSelect }: { item: NavItem; active: boolean;
   );
 }
 
-export default function Sidebar({ view, onSelect }: SidebarProps) {
+export default function Sidebar({ view, onSelect, showDev = false }: SidebarProps) {
   const openPath = useOpenPath();
   const toast = useToast();
   const { t } = useI18n();
@@ -90,12 +92,14 @@ export default function Sidebar({ view, onSelect }: SidebarProps) {
           <NavButton key={item.key} item={item} active={view === item.key} onSelect={() => onSelect(item.key)} />
         ))}
       </nav>
-      <div className="space-y-0.5 border-t border-line px-2 py-2">
-        <div className="px-3 pt-1 pb-1 text-[10px] tracking-wider text-ink-faint">{t("sidebar.devLabel")}</div>
-        {DEV_NAV.map((item) => (
-          <NavButton key={item.key} item={item} active={view === item.key} onSelect={() => onSelect(item.key)} />
-        ))}
-      </div>
+      {showDev && (
+        <div className="space-y-0.5 border-t border-line px-2 py-2">
+          <div className="px-3 pt-1 pb-1 text-[10px] tracking-wider text-ink-faint">{t("sidebar.devLabel")}</div>
+          {DEV_NAV.map((item) => (
+            <NavButton key={item.key} item={item} active={view === item.key} onSelect={() => onSelect(item.key)} />
+          ))}
+        </div>
+      )}
       <div className="border-t border-line px-2 py-2">
         <button
           type="button"

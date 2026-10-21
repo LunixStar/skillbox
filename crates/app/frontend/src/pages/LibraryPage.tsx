@@ -3,7 +3,7 @@
 /// agent 角标常驻可见，点击即部署 / 撤销；
 /// 两级删除语义：「取消部署」（正本不动）与「删除 Skill」（正本入回收站，二次确认）。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { LayoutGrid, List, RefreshCw, Search, Unlink, Trash2 } from "lucide-react";
 import {
@@ -347,11 +347,17 @@ export default function LibraryPage() {
     );
   }
 
-  function renderCard(skill: SkillMeta) {
+  /// 错峰 fade-up 内联样式（--sb-i 由 CSS 端 min() 截断到 10 项，§11.2）。
+  function fadeStyle(i: number): CSSProperties {
+    return { "--sb-i": i } as CSSProperties;
+  }
+
+  function renderCard(skill: SkillMeta, i: number) {
     return (
       <div
         key={skill.id}
-        className="sb-card sb-card--interactive flex cursor-pointer flex-col p-4"
+        className="sb-card sb-card--interactive sb-fade-up flex cursor-pointer flex-col p-4"
+        style={fadeStyle(i)}
         onClick={() => setSelectedId(skill.id)}
       >
         <div className="flex items-start justify-between gap-2">
@@ -375,11 +381,12 @@ export default function LibraryPage() {
     );
   }
 
-  function renderRow(skill: SkillMeta) {
+  function renderRow(skill: SkillMeta, i: number) {
     return (
       <div
         key={skill.id}
-        className="flex h-[60px] cursor-pointer items-center gap-3 border-b border-line px-4 transition-colors duration-120 hover:bg-surface"
+        className="sb-fade-up flex h-[60px] cursor-pointer items-center gap-3 border-b border-line px-4 transition-colors duration-120 hover:bg-surface"
+        style={fadeStyle(i)}
         onClick={() => setSelectedId(skill.id)}
       >
         <div className="min-w-0 flex-1">

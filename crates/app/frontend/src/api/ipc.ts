@@ -302,6 +302,16 @@ export function deployRevoke(opts: {
   return invoke<unknown>("deploy_revoke", opts);
 }
 
+/// 切换既有部署的同步模式（symlink ↔ copy）。
+export function deploySetMode(opts: {
+  skillId: number;
+  tool: string;
+  mode: "symlink" | "copy";
+  dryRun: boolean;
+}) {
+  return invoke<unknown>("deploy_set_mode", opts);
+}
+
 export const toolsList = () => invoke<ToolDto[]>("tools_list");
 
 export function toolsSetEnabled(opts: { toolId: string; enabled: boolean; dryRun: boolean }) {
