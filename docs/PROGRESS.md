@@ -1,5 +1,37 @@
 # SkillBox 开发进度
 
+## Step 7 设计系统：§11.1/§11.2 视觉基础（纯前端，mock）
+
+状态：完成
+
+做了：
+- **设计令牌双轨落地**：`index.css` `:root` CSS 变量为唯一正本（§11.1 全部 13 色 + 3 圆角 + 2 时长 + 缓动函数 + 卡片影），`tailwind.config.cjs` 全部经 `var()` 引用（primary 四阶 / highlight 青 / page / surface / line / ink 三级 / danger / success）；圆角 card 10px / btn 8px / tag 999px；duration 120/200ms；ease `cubic-bezier(.2,.8,.2,1)`；body 正文 14px + §11.1 字体栈。
+- **顶部 2px 高光条**（`HighlightBar` + `.sb-highlight-track`）：蓝→青→蓝 `linear-gradient`，200% 宽内层 `translateX(-50%)` 6s 线性无缝循环，纯 CSS。
+- **11 个基础组件**（`src/components/ui/` + barrel `index.ts`）：Card / Button / Badge / Tag / Toggle / Modal / Drawer / Tooltip / EmptyState / ProgressBar / Skeleton，全部受控 TSProps。
+- **卡片 hover**（`.sb-card--interactive`）：`translateY(-2px)` + 深影伪元素 + `conic-gradient` 蓝色描边伪元素（mask-composite 环形），三处全走 transform/opacity；`sb-card--lifted` 变体静态强制展示悬浮态（演示/测试用）。
+- **弹层/抽屉玻璃拟态**：backdrop `rgba(16,40,80,.32)` + `backdrop-filter: blur(8px)`；Modal pop（translateY+scale）/ Drawer slide-right 均 200ms 进出（keyframes `reverse forwards` 退出 + 200ms 延迟卸载 hook）。
+- **§11.2 动画纪律**：全部动画只动 transform/opacity（ProgressBar 用 scaleX 表达进度不动 width、Toggle 滑块 translateX、Tooltip group-hover opacity）；错峰 fade-up（`--sb-i` × 20ms，`min(·,10)` 封顶 10 项）；`prefers-reduced-motion` 全局 0.01ms 降级。
+- **DesignSystemPage.tsx**：13 色色板（色块 + hex + 变量名）、排版示范、高光条、卡片两种状态并排（默认态 vs 悬浮强制态——§11.1 未定义暗色主题，按默认/升起两态展示）、11 组件全变体、错峰 fade-up 10 项演示；App.tsx 改三视图切换（首页 / 设计系统 / IPC Tester）。
+
+没做：
+- 未接任何后端数据（全 mock，按步骤边界）；TanStack Query / lucide-react / react-router 未引入（Phase 3 按需加，均在 §1 白名单）。
+- 侧栏与 §11.3 信息架构布局（Phase 3 主流程步骤）。
+
+自检输出（真实结果）：
+1. `npm run build`（tsc --noEmit + vite）→ 通过；46 modules，CSS 19.45KB / JS 242.98KB（gzip 4.71/75.87KB）
+2. `cargo clippy --workspace -- -D warnings` → `Finished dev profile in 0.41s`，EXIT=0，零警告
+3. `cargo test --workspace` → EXIT=0；166 passed / 0 failed（adapters 23、domain 6、engine 117、ports 8、store 12）
+4. 核心五 crate `tauri::` grep → 0；前端运行时依赖仍为 react / react-dom / @tauri-apps/api（§1 白名单内，零新增；无动画库/图表库/粒子库）
+5. 全部 .rs ≤ 600 行（未改 Rust；新增前端文件最大 DesignSystemPage.tsx ~300 行）
+6. `cargo build --release -p skillbox-app` → 7.45 MB ≤ 12 MB
+7. release exe 启动存活 8 秒后正常关闭（DoD"能跑"）
+
+遗留风险 / 备案：
+- cargo 不追踪 `frontend/dist` 内容变化（本步 touch main.rs 强制重编嵌入）；日常开发走 `tauri dev`（vite 5173 热更）不受影响，发布走 `tauri build` 亦不受影响，仅"手跑 cargo build --release 验证前端"场景需先 npm run build + 触发重编。
+- Tailwind 颜色经 `var()` 引用后不支持 `bg-primary/10` 透明度修饰符（需透明度时用任意值 `bg-[rgba(...)]`）。
+- Modal/Drawer 退出动画用 keyframes `reverse forwards` 近似（视觉等价 200ms 退出），未引入 JS 过渡框架（遵守"禁动画库"约束）。
+- conic-gradient 描边为静态角度（0deg 起点淡蓝渐变环）；未做描边旋转动画（旋转需 @property 注册自定义属性，WebView2 支持但收益低，v1 不做）。
+
 ## Step 6 IPC 层：31 命令 + app 接线 + IPCTester
 
 状态：完成

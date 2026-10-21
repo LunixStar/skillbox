@@ -1,3 +1,214 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* §11.1 设计令牌 —— CSS 变量为唯一正本，Tailwind theme 经 var() 引用 */
+:root {
+  --sb-primary: #3b8ef0;
+  --sb-primary-hover: #2f7fd8;
+  --sb-primary-active: #256fc4;
+  --sb-primary-soft: #e8f2ff;
+  --sb-highlight: #56c8f0;
+  --sb-page: #ffffff;
+  --sb-surface: #f6f8fb;
+  --sb-line: #e3e9f0;
+  --sb-ink: #1b2430;
+  --sb-ink-secondary: #5a6675;
+  --sb-ink-faint: #8a94a3;
+  --sb-danger: #e5544b;
+  --sb-success: #2fa46a;
+  --sb-card-shadow: 0 1px 3px rgba(16, 40, 80, 0.06);
+  --sb-radius-card: 10px;
+  --sb-radius-btn: 8px;
+  --sb-radius-tag: 999px;
+  --sb-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sb-dur-micro: 120ms;
+  --sb-dur-page: 200ms;
+}
+
+@layer base {
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-size: 14px;
+    background: var(--sb-surface);
+    color: var(--sb-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  /* 卡片：白底 + 10px 圆角 + 1px 边框 + 浅影（§11.1） */
+  .sb-card {
+    position: relative;
+    background: var(--sb-page);
+    border: 1px solid var(--sb-line);
+    border-radius: var(--sb-radius-card);
+    box-shadow: var(--sb-card-shadow);
+  }
+
+  /* hover 升起态：只动 transform 与 opacity；深影与描边各占一个伪元素走 opacity */
+  .sb-card--interactive {
+    transition: transform var(--sb-dur-micro) var(--sb-ease);
+  }
+  .sb-card--interactive::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: calc(var(--sb-radius-card) + 1px);
+    padding: 1px;
+    background: conic-gradient(
+      from 0deg,
+      rgba(59, 142, 240, 0.4),
+      rgba(86, 200, 240, 0.1),
+      rgba(59, 142, 240, 0.4)
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity var(--sb-dur-micro) var(--sb-ease);
+    pointer-events: none;
+  }
+  .sb-card--interactive::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 6px 18px rgba(16, 40, 80, 0.12);
+    opacity: 0;
+    transition: opacity var(--sb-dur-micro) var(--sb-ease);
+    pointer-events: none;
+  }
+  .sb-card--interactive:hover,
+  .sb-card--lifted {
+    transform: translateY(-2px);
+  }
+  .sb-card--lifted::before,
+  .sb-card--lifted::after,
+  .sb-card--interactive:hover::before,
+  .sb-card--interactive:hover::after {
+    opacity: 1;
+  }
+
+  /* 顶部 2px 渐变高光条：蓝→青→蓝，缓慢横向流动，纯 CSS */
+  .sb-highlight-track {
+    position: relative;
+    height: 2px;
+    overflow: hidden;
+    background: var(--sb-primary-soft);
+  }
+  .sb-highlight-track::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 200%;
+    background: linear-gradient(90deg, var(--sb-primary), var(--sb-highlight), var(--sb-primary));
+    animation: sb-flow 6s linear infinite;
+  }
+
+  /* 列表项错峰 fade-up：间隔 20ms，最多 10 项（§11.2） */
+  .sb-fade-up {
+    opacity: 0;
+    animation: sb-fade-up var(--sb-dur-page) var(--sb-ease) forwards;
+    animation-delay: calc(min(var(--sb-i, 0), 10) * 20ms);
+  }
+
+  /* 弹层 / 抽屉进出（200ms） */
+  .sb-fade-enter {
+    animation: sb-fade var(--sb-dur-page) linear forwards;
+  }
+  .sb-fade-exit {
+    animation: sb-fade var(--sb-dur-page) linear reverse forwards;
+  }
+  .sb-pop-enter {
+    animation: sb-pop var(--sb-dur-page) var(--sb-ease) forwards;
+  }
+  .sb-pop-exit {
+    animation: sb-pop var(--sb-dur-page) var(--sb-ease) reverse forwards;
+  }
+  .sb-slide-right-enter {
+    animation: sb-slide-right var(--sb-dur-page) var(--sb-ease) forwards;
+  }
+  .sb-slide-right-exit {
+    animation: sb-slide-right var(--sb-dur-page) var(--sb-ease) reverse forwards;
+  }
+
+  /* 骨架屏呼吸 */
+  .sb-pulse {
+    animation: sb-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes sb-flow {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes sb-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sb-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sb-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sb-slide-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sb-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* §11.2 硬约束：prefers-reduced-motion 下关闭全部非必要动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
