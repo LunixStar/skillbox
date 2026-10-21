@@ -1,5 +1,55 @@
 # SkillBox 开发进度
 
+## Step 9 Skill 详情 / 溯源 / 更新 / 只读来源 + 工具页重排
+
+状态：完成
+
+做了：
+- **后端——索引可变列刷新**：
+  - `ports IndexStore::refresh_skill(skill_id, description, origin, content_hash)`（MemoryIndexStore + DbIndexStore 实现；name/canonical_path 不可变，0 行 → NotFound；store UPDATE skills SET description/origin_*/content_hash/updated_at）；更新的最小原语。
+- **后端——更新引擎**（`engine/update.rs` 新文件 + `update/tests.rs` 11 测试）：
+  - `UpdateContext{central_root,cache_root,trash_root,fs,clock,git,hasher,linker,index,watcher}`；`update_check(target,&ctx)` / `update_apply(target,dry_run,&ctx)`。
+  - **git 来源**：clone_head 到缓存临时目录 → 与已记录 revision 比对 → diff_summary（失败降级 None）；apply = 临时副本 fresh_tmp → copy_dir_all → 旧正本 move_to_trash → rename 原子换入（失败回滚 rename 回来）→ hash_dir → refresh_skill 记录新 revision；git 不可用 → Unsupported + 说明；revision 未记录 → UpdateAvailable + note「无法证明已是最新」。
+  - **local 来源**：fresh_state 重算 hash/description 比对；apply = refresh_skill(OriginInfo::local())（重新导入语义）。
+  - **archive 来源**：Unsupported（在线更新无意义，诚实提示重新导入）。
+  - 旧正本永远进 trash（无硬删除）；apply 全程 MuteGuard。
+- **后端——只读来源（§4.3 硬约束）**：
+  - `env ToolInfo.extra_scan_dirs`（resolve_extra_scan_dirs 已解析路径）+ `is_read_only_source(path,scope)`；**ipc deploy_apply / deploy_set_mode 入口硬守卫**：正本位于插件缓存内 → InvalidInput 拒绝（deploy_revoke 仍允许——撤销不算写入）。
+- **后端——IPC 实装**（复用既有 2 个命令槽位，命令总数 32 不变）：
+  - `updates_check(skill_id) → UpdateCheckOutcome{status,currentRevision,newRevision,diffSummary,note}`；`updates_apply(skill_id,dry_run) → UpdateOutcome{Applied|UpToDate|Preview|Unsupported}`；state 增 `update_context()`。
+  - `system_open_path` 支持 http(s) URL 分支：scheme 白名单 + 拒绝空白/控制字符 → explorer/open/xdg-open 打开（溯源卡「打开仓库」用）。
+  - `install.rs` 拆分（`install/tests.rs`），为 update.rs 腾挪空间。
+- **前端——详情页**（`pages/SkillDetailPage.tsx` 新文件）：
+  - 头部：名称 · 来源徽章 · 「未体检」风险徽章（诚实占位）· 只读来源徽章。
+  - **来源溯源卡**：类型 / 仓库 URL（「打开仓库」走 URL 分支）/ 子路径 / revision（12 字符截断）/「打开目录」（`skill:<id>`）。
+  - **SKILL.md 预览**：`library_doc_read` + 自建 `Markdown.tsx`（~215 行，frontmatter 剥离 + 标题/列表/代码块/引用/行内粗斜体代码链接，全 React 元素零 dangerouslySetInnerHTML——依赖白名单内无 markdown 库）。
+  - **更新卡**：git「检查更新」→ diff 摘要展示 → 确认弹层（明示"旧版移入回收站"）→ 应用；local「检查本地变更」→ 重新导入；archive 诚实提示不支持。
+  - **部署状态卡**：逐工具 mode 徽章（链接/副本）+ 路径 + 取消；未部署工具一键部署；只读来源整卡替换为「只读来源，不可部署」。
+- **前端——库页/工具页接线**：
+  - LibraryPage：卡片/行点击进详情（按 id 派生，skill 被删自动回落列表）；`isReadOnlySkill`（前端 extraScanDirs 前缀匹配）只读徽章 + agent 角标禁用（后端守卫为权威，前端为体验层）。
+  - ToolsPage 重排：按 form_factor 五组（命令行（CLI）/ IDE · 桌面端 / 编辑器插件 / 终端 TUI / 桌面助手）；已安装：图标瓦片 + 已检测徽章 + 形态徽标 + skills 路径 + 目录按钮 + 启停 Toggle；**未检测工具折叠区**（默认收起，说明"该工具的配置目录不存在——启动一次该工具即可被检测到"，展示性行不做开关）。
+- **修复历史违规**：`fix.rs` 632 行超 600 上限（Step 8 遗漏）→ 拆出 `fix/exec.rs`（执行器 + TOCTOU 复查，456 行），fix.rs 留入口/确认门/影响面文案/valid_skill_name（doc.rs、install.rs 引用不变）；IPCTester 过期分组标题与缺失参数修正。
+
+没做：
+- 安全体检实装（风险徽章仍为「未体检」占位，Phase 4）；标签编辑；文档编辑器（本步骤仅预览）；回收站恢复 UI（trash_list/restore 已有 IPC，界面留工具箱）。
+- 更新的定时自动检查（v1 手动触发即可，避免后台惊喜流量）。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 11.46s`，EXIT=0，零警告
+2. `cargo test --workspace` → 181 passed / 0 failed（adapters 23、domain 6、engine 130、ports 9、store 13；新增 update 11 测试 + env 2 + store/ports refresh_skill 2）
+3. `npm run build`（tsc --noEmit + vite）→ 通过（8.12s，2018 modules）
+4. 核心五 crate（domain/ports/adapters/engine/store）`tauri::` grep → 0
+5. 全部 .rs ≤ 600 行（fix.rs 632 违规修复：fix.rs 197 / fix/exec.rs 456；update.rs 372 / update/tests.rs 322 / install.rs 310 / install/tests.rs 293 / env.rs 452）
+6. IPC 命令 32 个 = §8 上限（updates_check/updates_apply 为既有槽位实装，无新增）
+7. `cargo build --release -p skillbox-app` → **7.5 MB ≤ 12 MB**（3m41s）
+8. release exe 启动存活验证 → ALIVE（8 秒）后正常关闭
+
+遗留风险 / 备案：
+- 更新 apply 的回滚为"尽力 rename 回来"：回滚失败时保留新正本 + trash 双份并如实报错（不丢数据优先）。
+- git 更新强依赖 git 在 PATH；缺失时 Unsupported + 说明，不阻塞其他功能。
+- 前端只读判定为路径前缀匹配（体验层）；权威判定在后端 deploy 守卫，绕过 UI 也会被拒。
+- diff_summary 依赖 git diff 输出，失败降级为 None（详情页相应不展示摘要，仍可更新）。
+
 ## Step 8 主流程 UI：首启向导 + 技能库/工具页 + TanStack Query
 
 状态：完成

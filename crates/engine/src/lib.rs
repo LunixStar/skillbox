@@ -22,6 +22,7 @@ pub mod reconcile;
 pub mod scan;
 pub mod system;
 pub mod types;
+pub mod update;
 
 pub use deploy::{
     deploy, undeploy, DeployRequest, DeployTarget, ToolUndeployOutcome, ToolUndeployResult,
@@ -30,8 +31,8 @@ pub use deploy::{
 pub use doc::{doc_read, doc_write, validate_meta, DocCheckReport, DocIssue, DocWriteOutcome};
 pub use doctor::{doctor, DoctorOpts};
 pub use env::{
-    doctor_targets, health_context, scan_roots, tool_deploy_dir, tools, HealthContextInputs,
-    ToolInfo,
+    doctor_targets, health_context, is_read_only_source, scan_roots, tool_deploy_dir, tools,
+    HealthContextInputs, ToolInfo,
 };
 pub use fix::{fix, FixRequest};
 pub use install::{install, InstallContext, InstallOutcome};
@@ -48,6 +49,10 @@ pub use system::{
     TrashEntry, TrashRestoreOutcome,
 };
 pub use types::*;
+pub use update::{
+    update_apply, update_check, UpdateCheckOutcome, UpdateContext, UpdateOutcome, UpdateReport,
+    UpdateStatus, UpdateTarget,
+};
 
 // ipc 禁止直接依赖 adapters（§2.1 依赖图）；环境类型经 engine 转发。
 pub use skillbox_adapters::{PathScope, ToolOverrides};

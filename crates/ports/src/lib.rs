@@ -345,6 +345,17 @@ pub trait IndexStore: Send + Sync {
     /// 删除 skill 索引行及其全部 `skill_targets` 记录与标签
     /// （删除 Skill：正本已移入 trash 后的索引清理）。
     fn delete_skill(&self, skill_id: SkillId) -> AppResult<()>;
+
+    /// 刷新 skill 行的可变列（更新 skill / 本地重导入用）：
+    /// description / origin_* / content_hash / updated_at。
+    /// 名称与 `canonical_path` 不变（身份与位置不动）。
+    fn refresh_skill(
+        &self,
+        skill_id: SkillId,
+        description: &str,
+        origin: &OriginInfo,
+        content_hash: Option<&str>,
+    ) -> AppResult<()>;
 }
 
 /// 内存索引行（`skills` 表）。
@@ -461,6 +472,25 @@ impl IndexStore for MemoryIndexStore {
         st.targets.retain(|t| t.skill_id != skill_id);
         Ok(())
     }
+
+    fn refresh_skill(
+        &self,
+        skill_id: SkillId,
+        description: &str,
+        origin: &OriginInfo,
+        content_hash: Option<&str>,
+    ) -> AppResult<()> {
+        let mut st = self.inner.lock().expect("MemoryIndexStore poisoned");
+        let row = st
+            .skills
+            .iter_mut()
+            .find(|s| s.id == skill_id)
+            .ok_or_else(|| skillbox_domain::AppError::not_found(format!("skill #{skill_id} 不存在")))?;
+        row.description = description.to_string();
+        row.origin = origin.clone();
+        row.content_hash = content_hash.map(|h| h.to_string());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -506,6 +536,27 @@ mod tests {
         store.delete_skill(id).unwrap();
         assert!(store.skills().is_empty());
         assert!(store.targets().is_empty());
+    }
+
+    #[test]
+    fn memory_index_store_refresh_skill_updates_mutable_columns() {
+        let store = MemoryIndexStore::new();
+        let id = store
+            .insert_skill("demo", "old", &OriginInfo::local(), Path::new("/central/demo"), Some("h1"))
+            .unwrap();
+        store
+            .refresh_skill(id, "new desc", &OriginInfo::git("https://x", None, Some("r2".into())), Some("h2"))
+            .unwrap();
+        let row = &store.skills()[0];
+        assert_eq!(row.description, "new desc");
+        assert_eq!(row.origin.revision.as_deref(), Some("r2"));
+        assert_eq!(row.content_hash.as_deref(), Some("h2"));
+        assert_eq!(row.name, "demo", "名称不可变");
+        assert_eq!(row.canonical_path, Path::new("/central/demo"), "正本位置不可变");
+
+        // 不存在的 skill → NotFound。
+        let err = store.refresh_skill(SkillId(999), "x", &OriginInfo::local(), None).unwrap_err();
+        assert_eq!(err.kind, skillbox_domain::ErrorKind::NotFound);
     }
 
     #[test]

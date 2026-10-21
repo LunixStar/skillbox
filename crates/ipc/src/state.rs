@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use skillbox_domain::{AppError, AppResult, ToolId};
 use skillbox_engine::{
     CancellationToken, HealthContextInputs, IndexView, InstallContext, OpsContext, ScanReport,
-    SkillRecord, TargetRecord,
+    SkillRecord, TargetRecord, UpdateContext,
 };
 use skillbox_ports::{
     Clock, FileSystem, GitClient, Hasher, IndexStore, Linker, ProdClock, ProdFileSystem,
@@ -119,6 +119,22 @@ impl AppState {
             trash_root: self.trash_root.clone(),
             fs: self.fs.clone(),
             clock: self.clock.clone(),
+            linker: self.linker.clone(),
+            index: self.index_store.clone(),
+            watcher: None,
+        }
+    }
+
+    /// 更新上下文（`updates_check` / `updates_apply` 用）。
+    pub fn update_context(&self) -> UpdateContext {
+        UpdateContext {
+            central_root: self.central_root.clone(),
+            cache_root: self.cache_root.clone(),
+            trash_root: self.trash_root.clone(),
+            fs: self.fs.clone(),
+            clock: self.clock.clone(),
+            git: self.git.clone(),
+            hasher: self.hasher.clone(),
             linker: self.linker.clone(),
             index: self.index_store.clone(),
             watcher: None,

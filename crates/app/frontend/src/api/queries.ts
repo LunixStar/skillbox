@@ -11,6 +11,7 @@ import {
 import {
   deployApply,
   deployRevoke,
+  libraryDocRead,
   libraryInstallLocal,
   libraryList,
   libraryRemove,
@@ -20,7 +21,11 @@ import {
   systemOpenPath,
   toolsList,
   toolsSetEnabled,
+  updatesApply,
+  updatesCheck,
   type InstallOutcome,
+  type UpdateCheckOutcome,
+  type UpdateOutcome,
 } from "./ipc";
 
 export const queryKeys = {
@@ -28,6 +33,8 @@ export const queryKeys = {
   library: ["library"] as const,
   targets: ["targets"] as const,
   firstRunDone: ["settings", "firstRunDone"] as const,
+  /// 详情页 SKILL.md 预览（按 skill id 缓存）。
+  skillDoc: (skillId: number) => ["skillDoc", skillId] as const,
 };
 
 export const FIRST_RUN_KEY = "first_run.done";
@@ -115,4 +122,34 @@ export function useCompleteFirstRun() {
 
 export function useOpenPath() {
   return useMutation({ mutationFn: (id: string) => systemOpenPath(id) });
+}
+
+// ---------------------------------------------------------------------------
+// 详情页：SKILL.md 预览 + 更新检查/应用
+// ---------------------------------------------------------------------------
+
+export function useSkillDoc(skillId: number) {
+  return useQuery({
+    queryKey: queryKeys.skillDoc(skillId),
+    queryFn: () => libraryDocRead(skillId),
+    enabled: Number.isFinite(skillId) && skillId > 0,
+  });
+}
+
+export function useUpdateCheck() {
+  return useMutation<UpdateCheckOutcome, Error, number>({
+    mutationFn: (skillId) => updatesCheck(skillId),
+  });
+}
+
+export function useUpdateApply() {
+  const qc = useQueryClient();
+  return useMutation<UpdateOutcome, Error, { skillId: number; dryRun: boolean }>({
+    mutationFn: ({ skillId, dryRun }) => updatesApply(skillId, dryRun),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.skillDoc(vars.skillId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.library });
+      void qc.invalidateQueries({ queryKey: queryKeys.targets });
+    },
+  });
 }

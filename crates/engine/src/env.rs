@@ -40,6 +40,9 @@ pub struct ToolInfo {
     pub link_capability: LinkCapability,
     pub icon: String,
     pub docs_url: String,
+    /// 该工具的插件缓存目录（`extra_scan_dirs`，已解析，§4.3）：
+    /// 只读来源——其中发现的 skill 只允许登记，不允许部署。
+    pub extra_scan_dirs: Vec<PathBuf>,
 }
 
 /// 当前平台的工具清单（含安装状态与部署目录）。
@@ -58,8 +61,24 @@ pub fn tools(fs: &dyn FileSystem, scope: &PathScope, overrides: &ToolOverrides) 
             link_capability: a.link_capability(),
             icon: a.icon.to_string(),
             docs_url: a.docs_url.to_string(),
+            extra_scan_dirs: a
+                .resolve_extra_scan_dirs(scope)
+                .into_iter()
+                .map(|d| d.path)
+                .collect(),
         })
         .collect()
+}
+
+/// `path` 是否落在任一工具的 `extra_scan_dirs`（插件缓存，§4.3）之下。
+///
+/// 只读来源判定（deploy 前置守卫用）：这些目录里的 skill 只允许发现与
+/// 登记，**不允许部署**（§4.3 硬约束）。按路径组件前缀比较。
+pub fn is_read_only_source(path: &Path, scope: &PathScope) -> bool {
+    adapters::all()
+        .iter()
+        .filter(|a| a.platform_matches())
+        .any(|a| a.resolve_extra_scan_dirs(scope).iter().any(|d| path.starts_with(&d.path)))
 }
 
 /// 按 id 解析部署目录（deploy 命令 / `system_open_path("tool:<id>")` 共用）。
@@ -356,6 +375,44 @@ mod tests {
         // 禁用 claude：目标清空（禁用即不参与体检）。
         let disabled = [ToolId("claude_code".into())];
         assert!(doctor_targets(&fs, &scope, &ToolOverrides::new(), &disabled).is_empty());
+    }
+
+    #[test]
+    fn tools_expose_extra_scan_dirs() {
+        let (_dir, scope) = scope();
+        let infos = tools(&ProdFileSystem, &scope, &ToolOverrides::new());
+        // 带 extra_scan_dirs 且支持当前平台的工具必须暴露解析后的目录。
+        let with_extra: Vec<_> = adapters::all()
+            .iter()
+            .filter(|a| a.platform_matches() && !a.extra_scan_dirs.is_empty())
+            .collect();
+        for adapter in with_extra {
+            let info = find_tool(&infos, adapter.id);
+            assert!(
+                !info.extra_scan_dirs.is_empty(),
+                "{} 应暴露 extra_scan_dirs",
+                adapter.id
+            );
+        }
+    }
+
+    #[test]
+    fn is_read_only_source_matches_extra_dirs_only() {
+        let (dir, scope) = scope();
+        // 选一个带 extra_scan_dirs 且支持当前平台的工具。
+        let adapter = adapters::all()
+            .iter()
+            .find(|a| a.platform_matches() && !a.extra_scan_dirs.is_empty())
+            .expect("当前平台必有带 extra_scan_dirs 的工具");
+        let extra = scope.resolve(adapter.extra_scan_dirs[0]);
+        let inside = extra.join("some-skill");
+        assert!(
+            is_read_only_source(&inside, &scope),
+            "extra_scan_dirs 内的路径必须判定为只读来源"
+        );
+        // 中央库与无关路径不是只读来源。
+        let central = dir.path().join("central").join("some-skill");
+        assert!(!is_read_only_source(&central, &scope));
     }
 
     #[test]

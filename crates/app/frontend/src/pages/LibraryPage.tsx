@@ -8,6 +8,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { LayoutGrid, List, RefreshCw, Search, Unlink, Trash2 } from "lucide-react";
 import {
   ipcError,
+  isReadOnlySkill,
   listenScanEvents,
   scanStart,
   scanStatus,
@@ -30,6 +31,7 @@ import VirtualList from "../components/VirtualList";
 import { useToast } from "../components/Toast";
 import { Badge, Button, EmptyState, Modal, Skeleton } from "../components/ui";
 import { useQueryClient } from "@tanstack/react-query";
+import SkillDetailPage from "./SkillDetailPage";
 
 type OriginFilter = "all" | "local" | "git" | "archive";
 type ViewMode = "grid" | "list";
@@ -68,6 +70,22 @@ export default function LibraryPage() {
   const [rescan, setRescan] = useState<RescanState>({ phase: "idle" });
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [showTags, setShowTags] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // 详情导航：按 id 派生，库数据刷新（更新/删除）后自动跟随或回落列表。
+  const selected = useMemo(
+    () => (selectedId == null ? null : (library.data ?? []).find((s) => s.id === selectedId) ?? null),
+    [selectedId, library.data],
+  );
+
+  // §4.3 只读来源：正本位于任一工具插件缓存内的 Skill（后端另有部署硬守卫）。
+  const readOnlyById = useMemo(() => {
+    const m = new Map<number, boolean>();
+    for (const s of library.data ?? []) {
+      m.set(s.id, isReadOnlySkill(s.canonicalPath, tools.data ?? []));
+    }
+    return m;
+  }, [library.data, tools.data]);
 
   // 部署意图索引：skillId → 已部署工具集合。
   const deployedBySkill = useMemo(() => {
@@ -251,13 +269,21 @@ export default function LibraryPage() {
   // ------------------------------------------------------------------
   function agentBadges(skill: SkillMeta) {
     const deployed = deployedBySkill.get(skill.id) ?? new Set<string>();
+    const readOnly = readOnlyById.get(skill.id) ?? false;
     return deployableTools.map((t) => {
       const isDeployed = deployed.has(t.id);
       return (
         <button
           key={t.id}
           type="button"
-          title={isDeployed ? `已部署到 ${t.displayName}，点击取消部署` : `点击部署到 ${t.displayName}`}
+          disabled={readOnly && !isDeployed}
+          title={
+            readOnly
+              ? "只读来源（插件缓存），不可部署"
+              : isDeployed
+                ? `已部署到 ${t.displayName}，点击取消部署`
+                : `点击部署到 ${t.displayName}`
+          }
           className={[
             "inline-flex h-6 items-center rounded-tag px-2 text-xs font-semibold transition-colors duration-120",
             isDeployed
@@ -268,7 +294,7 @@ export default function LibraryPage() {
             e.stopPropagation();
             if (isDeployed) {
               setConfirm({ kind: "revokeTool", skill, toolId: t.id });
-            } else {
+            } else if (!readOnly) {
               applyOne(skill, t.id);
             }
           }}
@@ -308,13 +334,18 @@ export default function LibraryPage() {
 
   function renderCard(skill: SkillMeta) {
     return (
-      <div key={skill.id} className="sb-card sb-card--interactive flex flex-col p-4">
+      <div
+        key={skill.id}
+        className="sb-card sb-card--interactive flex cursor-pointer flex-col p-4"
+        onClick={() => setSelectedId(skill.id)}
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 truncate text-sm font-medium text-ink" title={skill.name}>
             {skill.name}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
+            {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">只读</Badge>}
             <Badge tone="neutral">未体检</Badge>
           </div>
         </div>
@@ -333,12 +364,14 @@ export default function LibraryPage() {
     return (
       <div
         key={skill.id}
-        className="flex h-[60px] items-center gap-3 border-b border-line px-4 transition-colors duration-120 hover:bg-surface"
+        className="flex h-[60px] cursor-pointer items-center gap-3 border-b border-line px-4 transition-colors duration-120 hover:bg-surface"
+        onClick={() => setSelectedId(skill.id)}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm text-ink">{skill.name}</span>
             <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
+            {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">只读</Badge>}
           </div>
           <div className="truncate text-xs text-ink-faint">{skill.description || skill.canonicalPath}</div>
         </div>
@@ -351,6 +384,11 @@ export default function LibraryPage() {
   // ------------------------------------------------------------------
   // 页面
   // ------------------------------------------------------------------
+  // 详情页接管整个技能库区域（§9.4）；skill 被删除后自动回落列表。
+  if (selected) {
+    return <SkillDetailPage skill={selected} onBack={() => setSelectedId(null)} />;
+  }
+
   const error = library.isError ? library.error : targets.isError ? targets.error : tools.isError ? tools.error : null;
 
   return (

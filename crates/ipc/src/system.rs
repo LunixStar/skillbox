@@ -2,7 +2,8 @@
 //!
 //! 【硬约束】`system_open_path` 只接受后端生成的路径 id
 //! （`central` / `trash` / `cache` / `logs` / `skill:<id>` / `tool:<id>`），
-//! 前端不得自由传路径（防路径穿越）。
+//! 前端不得自由传路径（防路径穿越）。唯一例外：`http(s)://` URL
+//! （溯源页"打开仓库页面"）——scheme 白名单 + 拒绝空白 / 控制字符。
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +18,10 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub fn system_open_path(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    // http(s) URL：默认浏览器打开（溯源"打开仓库页面"）。
+    if let Some(url) = http_url_of(&id) {
+        return open_in_browser(url);
+    }
     let path = resolve_path_id(&state, &id)?;
     if !state.fs.exists(&path) {
         return Err(AppError::not_found(format!("路径不存在: {}", path.display())));
@@ -114,6 +119,19 @@ fn resolve_path_id(state: &AppState, id: &str) -> AppResult<PathBuf> {
     )))
 }
 
+/// 合法 http(s) URL：scheme 白名单 + 拒绝空白 / 控制字符
+/// （命令注入防护，§8 硬约束）。
+fn http_url_of(id: &str) -> Option<&str> {
+    let lower = id.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return None;
+    }
+    if id.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return None;
+    }
+    Some(id)
+}
+
 /// 用系统文件管理器打开目录（跨平台）。
 fn open_in_file_manager(path: &Path) -> AppResult<()> {
     let spawned = if cfg!(target_os = "windows") {
@@ -126,4 +144,18 @@ fn open_in_file_manager(path: &Path) -> AppResult<()> {
     spawned
         .map(|_| ())
         .map_err(|e| AppError::io(format!("打开路径失败: {e}")))
+}
+
+/// 用默认浏览器打开 URL（跨平台；参数已过 `http_url_of` 白名单校验）。
+fn open_in_browser(url: &str) -> AppResult<()> {
+    let spawned = if cfg!(target_os = "windows") {
+        std::process::Command::new("explorer").arg(url).spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(url).spawn()
+    };
+    spawned
+        .map(|_| ())
+        .map_err(|e| AppError::io(format!("打开 URL 失败: {e}")))
 }

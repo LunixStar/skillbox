@@ -4,8 +4,9 @@
 
 use skillbox_domain::{AppError, AppResult, SkillId, SyncMode, ToolId};
 use skillbox_engine::{
-    deploy_set_mode as engine_set_mode, deploy_to_tools, revoke, tool_deploy_dir, DeployOutcome,
-    PathScope, RevokeOutcome, SetModeOutcome, ToolDeployDir, ToolOverrides,
+    deploy_set_mode as engine_set_mode, deploy_to_tools, is_read_only_source, revoke,
+    tool_deploy_dir, DeployOutcome, PathScope, RevokeOutcome, SetModeOutcome, ToolDeployDir,
+    ToolOverrides,
 };
 use tauri::State;
 
@@ -20,6 +21,7 @@ pub fn deploy_apply(
     overwrite: bool,
     dry_run: bool,
 ) -> AppResult<DeployOutcome> {
+    reject_read_only(&state, skill_id)?;
     let dirs = resolve_dirs(&state, &tools)?;
     let index = state.index_view()?;
     let ctx = state.ops_context();
@@ -48,10 +50,26 @@ pub fn deploy_set_mode(
     mode: SyncMode,
     dry_run: bool,
 ) -> AppResult<SetModeOutcome> {
+    reject_read_only(&state, skill_id)?;
     let tool = ToolId(tool);
     let index = state.index_view()?;
     let ctx = state.ops_context();
     engine_set_mode(skill_id, tool, mode, dry_run, &index, &ctx)
+}
+
+/// §4.3 硬约束守卫：`extra_scan_dirs`（插件缓存）内的 skill 只允许发现与
+/// 登记，**不允许部署 / 改模式**（`deploy_revoke` 收尾清理不受限）。
+fn reject_read_only(state: &AppState, skill_id: SkillId) -> AppResult<()> {
+    let meta = state
+        .store
+        .get_skill(skill_id)?
+        .ok_or_else(|| AppError::not_found(format!("skill #{} 不存在", skill_id.0)))?;
+    if is_read_only_source(&meta.canonical_path, &PathScope::current()) {
+        return Err(AppError::invalid_input(
+            "该 skill 来自插件缓存（extra_scan_dirs，只读来源），不允许部署",
+        ));
+    }
+    Ok(())
 }
 
 /// 工具 id → 部署目录（engine::env 解析；未知工具 / 无全局目录 → 错误）。

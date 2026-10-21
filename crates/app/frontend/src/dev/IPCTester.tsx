@@ -16,7 +16,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "library (8)",
+    title: "library (9)",
     cmds: [
       { name: "library_list" },
       { name: "library_get", args: { skillId: 1 } },
@@ -88,8 +88,8 @@ const GROUPS: Group[] = [
   {
     title: "updates (2)",
     cmds: [
-      { name: "updates_check" },
-      { name: "updates_apply", args: { dryRun: true } },
+      { name: "updates_check", args: { skillId: 1 } },
+      { name: "updates_apply", args: { skillId: 1, dryRun: true } },
     ],
   },
 ];

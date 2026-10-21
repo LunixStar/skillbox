@@ -124,6 +124,37 @@ impl IndexStore for DbIndexStore {
         tx.commit().map_err(db_err)?;
         Ok(())
     }
+
+    fn refresh_skill(
+        &self,
+        skill_id: SkillId,
+        description: &str,
+        origin: &OriginInfo,
+        content_hash: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.conn.lock().map_err(|_| AppError::database("DB 连接锁中毒"))?;
+        let changed = conn
+            .execute(
+                "UPDATE skills SET description = ?1, origin_kind = ?2, origin_ref = ?3, \
+                 origin_subpath = ?4, origin_revision = ?5, content_hash = ?6, \
+                 updated_at = ?7 WHERE id = ?8",
+                rusqlite::params![
+                    description,
+                    origin.kind.as_str(),
+                    origin.ref_path,
+                    origin.subpath,
+                    origin.revision,
+                    content_hash,
+                    now_ms(),
+                    skill_id.0,
+                ],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(AppError::not_found(format!("skill #{skill_id} 不存在")));
+        }
+        Ok(())
+    }
 }
 
 /// `skill_targets` 单行（读侧投影；engine 的 `TargetRecord` 组装原料）。
@@ -306,6 +337,35 @@ mod tests {
         assert_eq!(meta.content_hash.as_deref(), Some("h1"));
         assert_eq!(store.list_skills().unwrap().len(), 1);
         assert!(store.get_skill(SkillId(999)).unwrap().is_none());
+    }
+
+    #[test]
+    fn refresh_skill_updates_mutable_columns() {
+        let (store, index) = shared();
+        let id = index
+            .insert_skill("demo", "旧描述", &OriginInfo::local(), Path::new("/central/demo"), Some("h1"))
+            .unwrap();
+        let old = store.get_skill(id).unwrap().unwrap();
+
+        index
+            .refresh_skill(
+                id,
+                "新描述",
+                &OriginInfo::git("https://x", Some("sub".into()), Some("r2".into())),
+                Some("h2"),
+            )
+            .unwrap();
+        let meta = store.get_skill(id).unwrap().unwrap();
+        assert_eq!(meta.description, "新描述");
+        assert_eq!(meta.origin_kind, OriginKind::Git);
+        assert_eq!(meta.origin_revision.as_deref(), Some("r2"));
+        assert_eq!(meta.content_hash.as_deref(), Some("h2"));
+        assert_eq!(meta.name, "demo", "名称不可变");
+        assert_eq!(meta.canonical_path, old.canonical_path, "正本位置不可变");
+        assert!(meta.updated_at >= old.updated_at);
+
+        let err = index.refresh_skill(SkillId(999), "x", &OriginInfo::local(), None).unwrap_err();
+        assert!(matches!(err.kind, skillbox_domain::ErrorKind::NotFound));
     }
 
     #[test]

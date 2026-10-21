@@ -13,7 +13,7 @@ export interface SkillMeta {
   name: string;
   description: string;
   originKind: "local" | "git" | "archive";
-  originRef: string;
+  originRef: string | null;
   originSubpath: string | null;
   originRevision: string | null;
   canonicalPath: string;
@@ -39,8 +39,10 @@ export interface ToolDto {
   deployDir: string | null;
   linkCapability: "symlink" | "junction" | "copyOnly";
   icon: string;
-  docsUrl: string | null;
+  docsUrl: string;
   enabled: boolean;
+  /// 插件缓存目录（extra_scan_dirs，已解析）：只读来源（§4.3）。
+  extraScanDirs: string[];
 }
 
 export interface ScanProgress {
@@ -82,6 +84,33 @@ export interface InstallOutcome {
   canonicalPath: string;
   dryRun: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// 更新（updates_check / updates_apply；§9.4 溯源·更新）
+// ---------------------------------------------------------------------------
+
+export type UpdateStatus = "upToDate" | "updateAvailable" | "unsupported";
+
+export interface UpdateCheckOutcome {
+  status: UpdateStatus;
+  currentRevision: string | null;
+  newRevision: string | null;
+  diffSummary: string | null;
+  note: string | null;
+}
+
+export interface UpdateReport {
+  revision: string | null;
+  diffSummary: string | null;
+}
+
+/// serde 外部标签：`{ "applied": {...} }` / `"upToDate"` / `{ "preview": {...} }` /
+/// `{ "unsupported": { "reason": "..." } }`。
+export type UpdateOutcome =
+  | { applied: UpdateReport }
+  | "upToDate"
+  | { preview: UpdateReport }
+  | { unsupported: { reason: string } };
 
 // ---------------------------------------------------------------------------
 // invoke 封装（仅本步骤 UI 用到的命令；全集见 dev/IPCTester）
@@ -135,6 +164,26 @@ export function toolsSetEnabled(opts: { toolId: string; enabled: boolean; dryRun
   return invoke<unknown>("tools_set_enabled", opts);
 }
 
+export function updatesCheck(skillId: number) {
+  return invoke<UpdateCheckOutcome>("updates_check", { skillId });
+}
+
+export function updatesApply(skillId: number, dryRun: boolean) {
+  return invoke<UpdateOutcome>("updates_apply", { skillId, dryRun });
+}
+
+export function libraryGet(skillId: number) {
+  return invoke<SkillMeta>("library_get", { skillId });
+}
+
+export function libraryDocRead(skillId: number) {
+  return invoke<string>("library_doc_read", { skillId });
+}
+
+export function libraryDocWrite(opts: { skillId: number; contents: string; dryRun: boolean }) {
+  return invoke<unknown>("library_doc_write", opts);
+}
+
 export function settingsGet(key: string) {
   return invoke<string | null>("settings_get", { key });
 }
@@ -145,6 +194,16 @@ export function settingsSet(opts: { key: string; value: string; dryRun: boolean 
 
 export function systemOpenPath(id: string) {
   return invoke<unknown>("system_open_path", { id });
+}
+
+/// §4.3 只读来源判定（前端侧）：正本位于任一工具的插件缓存
+/// （extra_scan_dirs）内 → 只读，不可部署（后端另有硬守卫）。
+export function isReadOnlySkill(canonicalPath: string, tools: ToolDto[]): boolean {
+  return tools.some((t) =>
+    t.extraScanDirs.some(
+      (d) => canonicalPath === d || canonicalPath.startsWith(d + "\\") || canonicalPath.startsWith(d + "/"),
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
