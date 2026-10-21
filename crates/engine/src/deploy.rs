@@ -33,7 +33,7 @@ use skillbox_ports::{Clock, FileSystem, Linker, WatchMute};
 
 pub(crate) mod classify;
 mod ops;
-mod policy;
+pub(crate) mod policy;
 pub(crate) mod write;
 
 pub use ops::{deploy, undeploy};

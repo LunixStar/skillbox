@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use skillbox_domain::{AppResult, ScanFingerprint, SkillId, SyncMode, ToolId};
+use skillbox_domain::{AppResult, OriginKind, ScanFingerprint, SkillId, SyncMode, ToolId};
 
 // ---------------------------------------------------------------------------
 // 共享数据结构
@@ -279,6 +279,38 @@ impl ScanCache for MemoryScanCache {
 // IndexStore（§3.2 skills / skill_targets 写入端口）
 // ---------------------------------------------------------------------------
 
+/// skill 的入库来源信息（`skills` 表 origin_* 列的写入面）。
+///
+/// 入库（install）与收编（adopt）共用：收编固定 [`OriginInfo::local`]。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginInfo {
+    pub kind: OriginKind,
+    /// 仓库 URL / 本地路径 / 压缩包路径。
+    pub ref_path: Option<String>,
+    /// 仓库内子路径（monorepo 场景）。
+    pub subpath: Option<String>,
+    /// 来源 revision（git）。
+    pub revision: Option<String>,
+}
+
+impl OriginInfo {
+    /// 本地来源（收编 / 本地目录入库）。
+    pub fn local() -> Self {
+        OriginInfo { kind: OriginKind::Local, ref_path: None, subpath: None, revision: None }
+    }
+
+    /// git 来源。
+    pub fn git(url: &str, subpath: Option<String>, revision: Option<String>) -> Self {
+        OriginInfo {
+            kind: OriginKind::Git,
+            ref_path: Some(url.to_string()),
+            subpath,
+            revision,
+        }
+    }
+}
+
 /// 中央库索引写入端口（`skills` / `skill_targets` 两表的写入面）。
 ///
 /// 读侧不设端口：调用方（ipc）直接查询 SQLite 组装 [`IndexView`] 快照
@@ -291,6 +323,7 @@ pub trait IndexStore: Send + Sync {
         &self,
         name: &str,
         description: &str,
+        origin: &OriginInfo,
         canonical_path: &Path,
         content_hash: Option<&str>,
     ) -> AppResult<SkillId>;
@@ -305,6 +338,13 @@ pub trait IndexStore: Send + Sync {
         mode: SyncMode,
         source_hash: Option<&str>,
     ) -> AppResult<()>;
+
+    /// 删除单条 `skill_targets` 记录（取消部署 / 移除 skill 时清理意图）。
+    fn delete_target(&self, skill_id: SkillId, tool_id: &ToolId) -> AppResult<()>;
+
+    /// 删除 skill 索引行及其全部 `skill_targets` 记录与标签
+    /// （删除 Skill：正本已移入 trash 后的索引清理）。
+    fn delete_skill(&self, skill_id: SkillId) -> AppResult<()>;
 }
 
 /// 内存索引行（`skills` 表）。
@@ -313,6 +353,7 @@ pub struct StoredSkill {
     pub id: SkillId,
     pub name: String,
     pub description: String,
+    pub origin: OriginInfo,
     pub canonical_path: PathBuf,
     pub content_hash: Option<String>,
 }
@@ -361,6 +402,7 @@ impl IndexStore for MemoryIndexStore {
         &self,
         name: &str,
         description: &str,
+        origin: &OriginInfo,
         canonical_path: &Path,
         content_hash: Option<&str>,
     ) -> AppResult<SkillId> {
@@ -377,6 +419,7 @@ impl IndexStore for MemoryIndexStore {
             id,
             name: name.to_string(),
             description: description.to_string(),
+            origin: origin.clone(),
             canonical_path: canonical_path.to_path_buf(),
             content_hash: content_hash.map(|h| h.to_string()),
         });
@@ -404,5 +447,74 @@ impl IndexStore for MemoryIndexStore {
             None => st.targets.push(row),
         }
         Ok(())
+    }
+
+    fn delete_target(&self, skill_id: SkillId, tool_id: &ToolId) -> AppResult<()> {
+        let mut st = self.inner.lock().expect("MemoryIndexStore poisoned");
+        st.targets.retain(|t| !(t.skill_id == skill_id && t.tool_id == *tool_id));
+        Ok(())
+    }
+
+    fn delete_skill(&self, skill_id: SkillId) -> AppResult<()> {
+        let mut st = self.inner.lock().expect("MemoryIndexStore poisoned");
+        st.skills.retain(|s| s.id != skill_id);
+        st.targets.retain(|t| t.skill_id != skill_id);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skillbox_domain::OriginKind;
+
+    #[test]
+    fn origin_info_serializes_camel_case() {
+        let origin = OriginInfo::git("https://x", Some("skills/a".into()), Some("abc".into()));
+        let json = serde_json::to_value(&origin).unwrap();
+        assert_eq!(json.get("kind"), Some(&serde_json::json!("git")));
+        assert_eq!(json.get("refPath"), Some(&serde_json::json!("https://x")));
+        assert_eq!(json.get("subpath"), Some(&serde_json::json!("skills/a")));
+        assert_eq!(json.get("revision"), Some(&serde_json::json!("abc")));
+        assert_eq!(OriginInfo::local().kind, OriginKind::Local);
+    }
+
+    #[test]
+    fn memory_index_store_delete_semantics() {
+        let store = MemoryIndexStore::new();
+        let tool_a = ToolId("claude_code".into());
+        let tool_b = ToolId("codex".into());
+        let id = store
+            .insert_skill(
+                "demo",
+                "demo skill",
+                &OriginInfo::local(),
+                Path::new("/central/demo"),
+                None,
+            )
+            .unwrap();
+        store.upsert_target(id, &tool_a, Path::new("/a/demo"), SyncMode::Symlink, None).unwrap();
+        store.upsert_target(id, &tool_b, Path::new("/b/demo"), SyncMode::Copy, None).unwrap();
+
+        // 删除单条 target：另一条保留。
+        store.delete_target(id, &tool_a).unwrap();
+        let targets = store.targets();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].tool_id, tool_b);
+
+        // 删除 skill：行与残余 target 一并清理。
+        store.delete_skill(id).unwrap();
+        assert!(store.skills().is_empty());
+        assert!(store.targets().is_empty());
+    }
+
+    #[test]
+    fn memory_index_store_stores_origin() {
+        let store = MemoryIndexStore::new();
+        let origin = OriginInfo::git("https://x", None, Some("r1".into()));
+        store
+            .insert_skill("demo", "", &origin, Path::new("/central/demo"), None)
+            .unwrap();
+        assert_eq!(store.skills()[0].origin, origin);
     }
 }

@@ -97,7 +97,13 @@ impl HealthTestEnv {
             hash_dir(self.fs.as_ref(), self.linker.as_ref(), self.hasher.as_ref(), &canonical);
         let id = self
             .store
-            .insert_skill(name, &format!("{name} skill"), &canonical, content_hash.as_deref())
+            .insert_skill(
+                name,
+                &format!("{name} skill"),
+                &skillbox_ports::OriginInfo::local(),
+                &canonical,
+                content_hash.as_deref(),
+            )
             .unwrap();
         for (tool, mode, source_hash) in targets {
             let source_hash = match mode {

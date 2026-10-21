@@ -13,20 +13,44 @@
 
 pub mod deploy;
 pub mod doctor;
+pub mod doc;
+pub mod env;
 pub mod fix;
+pub mod install;
+pub mod ops;
 pub mod reconcile;
 pub mod scan;
+pub mod system;
 pub mod types;
 
 pub use deploy::{
     deploy, undeploy, DeployRequest, DeployTarget, ToolUndeployOutcome, ToolUndeployResult,
     UndeployReport, UndeployRequest, UndeployTarget,
 };
+pub use doc::{doc_read, doc_write, validate_meta, DocCheckReport, DocIssue, DocWriteOutcome};
 pub use doctor::{doctor, DoctorOpts};
+pub use env::{
+    doctor_targets, health_context, scan_roots, tool_deploy_dir, tools, HealthContextInputs,
+    ToolInfo,
+};
 pub use fix::{fix, FixRequest};
+pub use install::{install, InstallContext, InstallOutcome};
+pub use ops::{
+    deploy_set_mode, deploy_to_tools, remove_skill, revoke, DeployAction, DeployOutcome,
+    DeployPreview, OpsContext, RemoveMode, RemoveSkillOutcome, RemoveSkillPreview, RemoveSkillReport,
+    RevokeAction, RevokeOutcome, RevokePreview, RevokeReport, SetModeOutcome, SetModePreview,
+    ToolDeployDir, ToolDeployPreview, ToolRevokePreview,
+};
 pub use reconcile::reconcile;
 pub use scan::scan;
+pub use system::{
+    cache_clear, cache_inspect, trash_list, trash_restore, CacheClearReport, CacheEntry,
+    TrashEntry, TrashRestoreOutcome,
+};
 pub use types::*;
+
+// ipc 禁止直接依赖 adapters（§2.1 依赖图）；环境类型经 engine 转发。
+pub use skillbox_adapters::{PathScope, ToolOverrides};
 
 #[cfg(test)]
 mod test_env;
@@ -59,17 +83,8 @@ use skillbox_domain::{AppResult, SkillId, ToolId};
 // install / deploy —— 入库与部署分离（K5）
 // ---------------------------------------------------------------------------
 
-/// 入库：只写中央库 `~/.skillbox/skills/`，**不碰任何 agent 目录**。
-///
-/// 契约：
-/// - 与 deploy 永不合并（K5 硬约束）。
-/// - 返回新 skill 的 id；frontmatter `name` 必须符合
-///   `^[a-z0-9][a-z0-9-]{1,63}$`，否则 `InvalidInput`。
-/// - 首启 keep-in-place 登记同样走这里（canonical_path 指向首次发现位置）。
-pub fn install(req: InstallRequest) -> AppResult<SkillId> {
-    let _ = &req;
-    todo!("Phase 1：实现入库（engine/src/install.rs）")
-}
+// 入库实现见 `engine/src/install.rs`（只写中央库，不碰 agent 目录；
+// keep-in-place / git / dry_run 见其模块文档）；单测同文件。
 
 // 部署 / 取消部署：链接部署与显式覆盖授权（§5）已实现，见
 // deploy / undeploy 与 `engine/src/deploy.rs`（含硬约束清单）；

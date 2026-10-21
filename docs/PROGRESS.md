@@ -1,5 +1,54 @@
 # SkillBox 开发进度
 
+## Step 6 IPC 层：31 命令 + app 接线 + IPCTester
+
+状态：完成
+
+做了：
+- **engine 全量补齐**（Phase 2 前置，本步一并交付；engine 59 → 117 测试）：
+  - env.rs（新增 318 行）：engine 侧环境组装（adapters 消费面）——`tools()` 工具快照、`tool_deploy_dir()`、`scan_roots()` / `doctor_targets()`（`disabled: &[ToolId]` 过滤禁用工具）、`health_context(HealthContextInputs)`；9 测试（含 `scan_roots_exclude_disabled_tools`，禁用 → 空目标集）。
+  - install.rs（新增 504 行）：`install(InstallRequest, dry_run, ctx)` —— `InstallSource::Local{path}`（keep_in_place 收编/复制）与 `Git{url, subpath, revision}`（经 GitClient 端口）两来源，InstallOutcome；12 测试。
+  - ops.rs + ops/tests.rs（478 + 393 行）：`deploy_to_tools` / `revoke` / `remove_skill`（RemoveMode::Undeploy|Delete）/ `deploy_set_mode` —— deploy/undeploy 的索引编排层（IndexView 读写 + skill_targets 记录维护，全带 dry_run）；13 测试。
+  - system.rs（新增 404 行）：`cache_inspect` / `cache_clear` / `trash_list` / `trash_restore`；12 测试。
+  - doc.rs（新增 327 行）：`doc_read` / `doc_write`（DocWriteOutcome）/ `validate_meta`（DocCheckReport）；11 测试。
+  - fix.rs：`FixRequest` 新增 `pub dry_run: bool`，`dry_run_outcome()` 按问题类型返回影响面预览（NeedsConfirmation{impact}），零写盘零索引写入；新增测试 `dry_run_previews_impact_with_zero_writes`。
+  - lib.rs：新增 `pub use skillbox_adapters::{PathScope, ToolOverrides};` 与 `OpsContext` 再导出；`audit_skill` / `context_cost` 仍为 todo!()（占位命令不触达）。
+- **ports / store 生产接线**：
+  - ports：新增 `OriginInfo`（skills 表 origin_* 列写入面，install 与 adopt 共用，收编固定 local）；`IndexStore` trait 扩展 `delete_target` / `delete_skill`（revoke/remove 用）；3 新测试（总 8）。
+  - store/index.rs（新增 330 行）：`DbIndexStore`（SQLite IndexStore 生产实现）+ `Store` 索取面（`index_store()` / `list_skills` / `get_skill` / `list_targets` / `get_setting` / `set_setting`）；5 新测试（store 总 12）。
+- **ipc crate 全量落地**（§8 全部 31 命令 ≤ 32 上限，11 个源文件，单文件最大 state.rs 142 行 ≤ 400 红线）：`AppState` 集中持有 store / index_store / central·cache·trash·logs 四根 / fs·clock·linker·hasher·git 生产实现 Arc / `scan: Arc<Mutex<ScanSession>>`，`init(AppStateInputs)` 一次构建由 app `.manage()`；AppError 为 Serialize + std::error::Error → Tauri v2 合法命令错误类型（序列化给 JS）。
+  - **scan 单会话模型**：running 时二次 scan_start → InvalidInput；scan_cancel 空闲 → NotFound；后台线程执行，`scan://progress` / `scan://done` / `scan://error` 三事件广播（tauri::Emitter）；`scan_start` 泛型 `<R: tauri::Runtime>` 支撑泛型 `register<R>`。
+  - **写命令 12 个全部带 dry_run**（§8 硬约束）：install_local / install_git / library_remove / doc_write / deploy_apply / deploy_revoke / deploy_set_mode / tools_set_enabled / doctor_fix / cache_clear / trash_restore / settings_set，全部下传 engine 既有 dry_run 通道（install/ops/doc/fix/system）。
+  - **工具开关**：settings 键 `tools.disabled`（JSON id 数组，`DISABLED_TOOLS_KEY` 常量）；tools_list 返回 `ToolDto { #[serde(flatten)] info: ToolInfo, enabled: bool }`；tools_set_enabled 对照 engine env 快照校验 id（未知 → NotFound），disabled 集经 HealthContextInputs.scan_roots 生效。
+  - **doctor_fix**：items: Vec<String>（→IssueId）空 → InvalidInput；confirmed 映射 ReplacePolicy（UserConfirmed / NoClobber）；复用 Step 5 确认门语义。
+  - **deploy**：apply 空 tools → InvalidInput，目标目录经 engine `env::tool_deploy_dir`（ipc 不碰 adapters）；revoke 空工具 = 撤销全部记录（engine 语义）。
+  - **system_open_path**：仅接受后端生成 id（central / trash / cache / logs / skill:<id> / tool:<id>，防路径穿越），路径须存在（NotFound），explorer / open / xdg-open 按平台分发。
+  - **system_trash_restore**：dest 仅 "central"（v1），其余 InvalidInput。
+  - **占位命令**（Phase 4 实装）：security_scan / security_report / cost_report / system_logs_export / updates_check / updates_apply —— 返回真实类型（SecurityReport / CostReport 等），实现为结构化 `AppError::internal("尚未实现：…（Phase 4…）")`，前端拿到可分组错误而非 panic。
+- **app 接线**：run() 组合根 = data_root()（`~/.skillbox`）+ create_dir_all skills/cache/trash/logs + `AppState::init` + `.manage(state)` + `ipc::register`；app 依赖仅 skillbox-ipc（+tauri），PathScope 经 ipc 再导出满足依赖方向。
+- **前端 IPCTester**：`crates/app/frontend/src/dev/IPCTester.tsx` —— 31 命令按 scan/library/deploy/tools/doctor/panels/system/settings/updates 9 组分列，CmdRow 支持编辑 JSON 参数 + Run + 输出 pre；App.tsx 提供 home/dev 切换；`npm run build`（tsc --noEmit + vite）通过。
+
+没做：
+- 6 个占位命令的真实现（security/cost 面板、日志导出 zip、更新检查/应用 —— Phase 4 边界）。
+- engine `audit_skill` / `context_cost` 仍为 todo!()（占位命令不触达）。
+- 生产 UI 页面（Phase 3；本步只交付 dev IPCTester 验证层）。
+- WatchMute 真实 watcher（端口预留，ipc 经 `None` 传参不触达）。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace -- -D warnings` → `Finished ... in 3.44s`，EXIT=0，零警告
+2. `cargo test --workspace` → EXIT=0；166 passed / 0 failed（adapters 23、domain 6、engine 117、ports 8、store 12、ipc/app 0）
+3. `grep -rn "tauri::" crates/{domain,ports,adapters,engine,store}/` → 0 匹配
+4. 全部源文件 ≤ 600 行（最大 engine/fix.rs 546）；ipc 单文件最大 state.rs 142 ≤ 400
+5. `cargo build --release -p skillbox-app` → `target/release/skillbox-app.exe` 7.45 MB ≤ 12 MB（ipc+接线增量 +1.58 MB）
+6. 前端 `npm run build`（tsc --noEmit + vite）→ 通过，零 TS 错误
+
+遗留风险 / 备案：
+- scan 后台线程与 scan_status/scan_cancel 经 `Arc<Mutex<ScanSession>>` 串行化；单进程 IPC 串行调用下无并发写风险，多窗口场景未定义（v1 单窗口）。
+- system_open_path 的 skill:<id> / tool:<id> 依赖 store / engine env 解析成功；skill 未入库或工具未安装时 NotFound（不猜测路径）。
+- trash_restore dest="central" 之外的目标（含原位恢复）推迟 v2；中央库内重名由 trash slot 命名空间规避（system.rs 复用 engine trash_restore 的 slot 语义）。
+- settings 为通用 key/value 透传（含 tools.disabled）；settings_set 的 key 白名单校验推迟 Phase 3 UI 表单层。
+- AppError 序列化为 Tauri 命令错误后前端拿到 `string`（serde 结构体字符串）；IPCTester 直接展示，Phase 3 若需结构化错误码再评估 serde 错误通道。
+
 ## Step 5 磁盘优先：reconcile / doctor / fix（K4）
 
 状态：完成

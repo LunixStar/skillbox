@@ -5,9 +5,11 @@
 //! 【硬约束】`skillbox.db` 禁止存放 skill 正文、frontmatter 全文
 //!（只存 name / description 摘要）、任何密钥。
 
+pub mod index;
 pub mod migrate;
 pub mod scan_cache;
 
+pub use index::{DbIndexStore, Store, TargetRow};
 pub use migrate::{current_version, run_migrations};
 pub use scan_cache::DbScanCache;
 

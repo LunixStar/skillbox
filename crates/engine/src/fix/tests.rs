@@ -48,6 +48,7 @@ fn fix_req<'a>(
         trash_root: env.trash.clone(),
         index_store: Some(env.store.clone()),
         watcher: None,
+        dry_run: false,
     }
 }
 
@@ -151,6 +152,7 @@ fn adopt_without_index_store_is_skipped() {
         trash_root: env.trash.clone(),
         index_store: None,
         watcher: None,
+        dry_run: false,
     };
     let report = fix(req).unwrap();
     match &single(&report).outcome {
@@ -266,6 +268,7 @@ fn missing_target_copy_requires_index_store() {
         trash_root: env.trash.clone(),
         index_store: None,
         watcher: None,
+        dry_run: false,
     };
     let report = fix(req).unwrap();
     assert!(matches!(single(&report).outcome, FixOutcome::Skipped { .. }), "{:?}", report.results);
@@ -373,4 +376,34 @@ fn fix_uses_live_disk_state_not_doctor_snapshot() {
     }
     // 中央库没有被塞入收编。
     assert!(!env.central_root.join("stray").exists());
+}
+
+// ---------------------------------------------------------------------------
+// dry-run（§8 写操作统一 dry_run 约束）
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dry_run_previews_impact_with_zero_writes() {
+    let env = HealthTestEnv::new();
+    let stray = env.target_path("claude", "stray");
+    std::fs::create_dir_all(&stray).unwrap();
+    std::fs::write(stray.join("SKILL.md"), b"---\nname: stray\n---\nbody").unwrap();
+    let id = issue_id(&env, &["claude"], DiscrepancyKind::UnmanagedRealDir, &stray);
+
+    // dry_run：即使 UserConfirmed 也只预览影响面，不执行。
+    let mut req = fix_req(&env, ReplacePolicy::UserConfirmed, vec![id], &["claude"]);
+    req.dry_run = true;
+    let report = fix(req).unwrap();
+    match &single(&report).outcome {
+        FixOutcome::NeedsConfirmation { reason } => {
+            assert!(reason.contains("收编"), "影响面预览: {reason}");
+        }
+        other => panic!("dry_run 应 NeedsConfirmation 预览: {other:?}"),
+    }
+
+    // 零写盘：目录原样、中央库无收编、索引无登记。
+    assert!(stray.join("SKILL.md").is_file(), "dry_run 磁盘零改动");
+    assert!(!env.central_root.join("stray").exists(), "dry_run 不收编");
+    assert!(env.store.skills().is_empty(), "dry_run 零索引写入");
+    assert!(env.store.targets().is_empty());
 }

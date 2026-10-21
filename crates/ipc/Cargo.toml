@@ -10,3 +10,5 @@ serde_json = { workspace = true }
 tauri = { workspace = true }
 skillbox-domain = { workspace = true }
 skillbox-engine = { workspace = true }
+skillbox-ports = { workspace = true }
+skillbox-store = { workspace = true }

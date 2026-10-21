@@ -60,6 +60,9 @@ pub struct FixRequest<'a> {
     /// 索引写入端口；None = 只修磁盘、不碰索引（需要登记的动作将 Skipped）。
     pub index_store: Option<Arc<dyn IndexStore>>,
     pub watcher: Option<Arc<dyn WatchMute>>,
+    /// dry-run：逐项返回将执行的动作与影响面（NeedsConfirmation），
+    /// 零写盘、零索引写入（§8 写操作统一 dry_run 约束）。
+    pub dry_run: bool,
 }
 
 impl fmt::Debug for FixRequest<'_> {
@@ -92,7 +95,11 @@ pub fn fix(req: FixRequest<'_>) -> AppResult<FixReport> {
         let outcome = if !handled.insert(item.0.clone()) {
             FixOutcome::Skipped { reason: "重复传入的问题 id，已忽略".to_string() }
         } else if let Some(d) = by_id.get(item.0.as_str()) {
-            execute_item(&req, d)
+            if req.dry_run {
+                dry_run_outcome(d)
+            } else {
+                execute_item(&req, d)
+            }
         } else {
             FixOutcome::Skipped { reason: "问题已不存在（磁盘现状已变化）".to_string() }
         };
@@ -141,6 +148,30 @@ fn execute_item(req: &FixRequest<'_>, d: &Discrepancy) -> FixOutcome {
             }
             update_copy(req, d)
         }
+    }
+}
+
+/// dry-run 预览：逐项返回将执行的动作与影响面，零写盘、零索引写入。
+fn dry_run_outcome(d: &Discrepancy) -> FixOutcome {
+    match d.kind {
+        DiscrepancyKind::DuplicateName => FixOutcome::Skipped {
+            reason: "同名目录需人工挑选正本，fix 不自动处理".to_string(),
+        },
+        DiscrepancyKind::UnmanagedRealDir => FixOutcome::NeedsConfirmation { reason: adopt_impact(d) },
+        DiscrepancyKind::ForeignLink => FixOutcome::NeedsConfirmation { reason: remove_link_impact(d) },
+        DiscrepancyKind::BrokenLink if matches!(d.suggested_fix, SuggestedFix::RebuildLink) => {
+            FixOutcome::NeedsConfirmation {
+                reason: format!("将重建指向中央库正本的链接 {}", d.path.display()),
+            }
+        }
+        DiscrepancyKind::BrokenLink => FixOutcome::NeedsConfirmation { reason: remove_broken_impact(d) },
+        DiscrepancyKind::MissingTarget => FixOutcome::NeedsConfirmation {
+            reason: format!("将重新部署缺失的目标 {}", d.path.display()),
+        },
+        DiscrepancyKind::UnrecordedDeployment => FixOutcome::NeedsConfirmation {
+            reason: format!("将补登记部署记录 {}", d.path.display()),
+        },
+        DiscrepancyKind::CopyDrift => FixOutcome::NeedsConfirmation { reason: update_copy_impact(d) },
     }
 }
 
@@ -265,6 +296,7 @@ fn adopt(req: &FixRequest<'_>, d: &Discrepancy) -> FixOutcome {
     let skill_id = match store.insert_skill(
         &name,
         description.as_deref().unwrap_or(""),
+        &skillbox_ports::OriginInfo::local(),
         &dest,
         content_hash.as_deref(),
     ) {
@@ -509,8 +541,8 @@ fn find_record<'a>(index: &'a IndexView, d: &Discrepancy) -> Option<&'a TargetRe
 }
 
 /// `^[a-z0-9][a-z0-9-]{1,63}$`（§9.3）：总长 2..=64，首字符小写字母/数字，
-/// 其余小写字母/数字/连字符。
-fn valid_skill_name(name: &str) -> bool {
+/// 其余小写字母/数字/连字符。install / doc 校验共用。
+pub(crate) fn valid_skill_name(name: &str) -> bool {
     let bytes = name.as_bytes();
     if bytes.len() < 2 || bytes.len() > 64 {
         return false;

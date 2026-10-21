@@ -424,6 +424,10 @@ pub struct InstallRequest {
     pub source: InstallSource,
     /// 覆盖名称；None = 取 frontmatter `name` 或目录名。
     pub name: Option<String>,
+    /// Local 来源专用：正本留在原位（canonical_path = 来源路径），
+    /// 不复制入库（首启 keep-in-place 登记同走此开关）。
+    #[serde(default)]
+    pub keep_in_place: bool,
 }
 
 /// 单个工具上的部署结果。
