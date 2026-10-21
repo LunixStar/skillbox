@@ -15,6 +15,8 @@ import {
   doctorFix,
   doctorRun,
   libraryDocRead,
+  libraryDocValidate,
+  libraryDocWrite,
   libraryInstallLocal,
   libraryList,
   libraryRemove,
@@ -28,6 +30,8 @@ import {
   toolsSetEnabled,
   updatesApply,
   updatesCheck,
+  type DocCheckReport,
+  type DocWriteOutcome,
   type InstallOutcome,
   type UpdateCheckOutcome,
   type UpdateOutcome,
@@ -169,6 +173,28 @@ export function useSkillDoc(skillId: number) {
     queryKey: queryKeys.skillDoc(skillId),
     queryFn: () => libraryDocRead(skillId),
     enabled: Number.isFinite(skillId) && skillId > 0,
+  });
+}
+
+/// 编辑器实时校验（§9.3）：对任意文本做静态检查，零写盘。
+/// 高频调用（防抖后仍每键级），不走 react-query 缓存，页面自管节流。
+export function docValidate(skillId: number, contents: string): Promise<DocCheckReport> {
+  return libraryDocValidate(skillId, contents);
+}
+
+/// 保存 SKILL.md：后端先校验（错误拒绝）→ 写 .bak → 写入 → 单 skill
+/// 增量重扫；成功后统一失效预览 / 库 / 安全扫描 / 成本估算。
+export function useDocSave() {
+  const qc = useQueryClient();
+  return useMutation<DocWriteOutcome, Error, { skillId: number; contents: string }>({
+    mutationFn: (vars) => libraryDocWrite({ ...vars, dryRun: false }),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.skillDoc(vars.skillId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.library });
+      void qc.invalidateQueries({ queryKey: queryKeys.security(vars.skillId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.securityOverview });
+      void qc.invalidateQueries({ queryKey: queryKeys.cost });
+    },
   });
 }
 

@@ -32,9 +32,9 @@ const GROUPS: Group[] = [
       { name: "library_doc_read", args: { skillId: 1 } },
       {
         name: "library_doc_write",
-        args: { skillId: 1, contents: "---\nname: demo\ndescription: demo\n---\nbody", dryRun: true },
+        args: { skillId: 1, contents: "---\nname: demo-skill\ndescription: a demo skill for testing\n---\nbody", dryRun: false },
       },
-      { name: "library_doc_validate", args: { skillId: 1 } },
+      { name: "library_doc_validate", args: { skillId: 1, contents: "---\nname: demo-skill\ndescription: short\n---\n[ref](missing.md)" } },
     ],
   },
   {

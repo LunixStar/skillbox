@@ -32,7 +32,10 @@ pub use deploy::{
     deploy, undeploy, DeployRequest, DeployTarget, ToolUndeployOutcome, ToolUndeployResult,
     UndeployReport, UndeployRequest, UndeployTarget,
 };
-pub use doc::{doc_read, doc_write, validate_meta, DocCheckReport, DocIssue, DocWriteOutcome};
+pub use doc::{
+    doc_read, doc_write, rescan_after_doc_save, validate_meta, validate_text, DocCheckReport,
+    DocIssue, DocWriteOutcome,
+};
 pub use doctor::{doctor, DoctorOpts};
 pub use env::{
     doctor_targets, health_context, is_read_only_source, scan_roots, tool_deploy_dir, tools,

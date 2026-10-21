@@ -201,6 +201,26 @@
   }
 }
 
+/* SKILL.md 编辑器（§9.3）：frontmatter 装饰高亮 + 校验行内标记 */
+.sb-fm-line {
+  background: rgba(59, 142, 240, 0.04);
+}
+.sb-fm-key {
+  color: var(--sb-primary);
+  font-weight: 600;
+}
+.sb-fm-sep {
+  color: var(--sb-ink-faint);
+}
+.sb-diag-error {
+  background: rgba(229, 84, 75, 0.09);
+  box-shadow: inset 3px 0 0 var(--sb-danger);
+}
+.sb-diag-warn {
+  background: rgba(59, 142, 240, 0.07);
+  box-shadow: inset 3px 0 0 var(--sb-primary);
+}
+
 /* §11.2 硬约束：prefers-reduced-motion 下关闭全部非必要动画 */
 @media (prefers-reduced-motion: reduce) {
   *,

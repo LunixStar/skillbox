@@ -229,6 +229,34 @@ export interface CostReport {
 }
 
 // ---------------------------------------------------------------------------
+// SKILL.md 编辑器（§9.3：doc_read / doc_write / doc_validate）
+// ---------------------------------------------------------------------------
+
+/// 单条校验发现；`line` 为 1 起始行号（0 = 无确切行，行内标记用）。
+export interface DocIssue {
+  /// missing_name / invalid_name / name_mismatch / missing_description /
+  /// short_description / long_description / unclosed_fence / missing_file。
+  rule: string;
+  message: string;
+  line: number;
+}
+
+export interface DocCheckReport {
+  errors: DocIssue[];
+  warnings: DocIssue[];
+}
+
+export interface DocWriteOutcome {
+  dryRun: boolean;
+  /// 写入前自动备份的旧文路径（keep 1）。
+  backup: string | null;
+  warnings: DocIssue[];
+  /// 保存后单 skill 增量重扫是否已刷新索引。
+  indexRefreshed: boolean;
+  indexError: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // invoke 封装（仅本步骤 UI 用到的命令；全集见 dev/IPCTester）
 // ---------------------------------------------------------------------------
 
@@ -309,7 +337,13 @@ export function libraryDocRead(skillId: number) {
 }
 
 export function libraryDocWrite(opts: { skillId: number; contents: string; dryRun: boolean }) {
-  return invoke<unknown>("library_doc_write", opts);
+  return invoke<DocWriteOutcome>("library_doc_write", opts);
+}
+
+/// 元数据校验：`contents` 给定时校验编辑器中的文本（实时，零写盘），
+/// 省略时校验盘上内容。错误阻断保存、告警不阻断（§9.3）。
+export function libraryDocValidate(skillId: number, contents?: string) {
+  return invoke<DocCheckReport>("library_doc_validate", { skillId, contents: contents ?? null });
 }
 
 export function settingsGet(key: string) {

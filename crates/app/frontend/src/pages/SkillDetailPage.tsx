@@ -1,18 +1,24 @@
-/// Skill 详情页（§9.4）：SKILL.md 预览 · 来源溯源 · 更新 · 部署状态。
+/// Skill 详情页（§9.4 + §9.3）：SKILL.md 预览/编辑（CodeMirror，校验行内
+/// 标记 + 底部问题列表，错误阻断保存）· 来源溯源 · 更新 · 部署状态。
 /// 更新语义按来源分派：git=fetch 比对（先看 diff 摘要再应用）、
 /// local=重新导入比对、archive=不支持在线更新（诚实提示）。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   ExternalLink,
   FolderOpen,
+  Pencil,
   RefreshCw,
+  Save,
   Unlink,
+  X,
 } from "lucide-react";
 import {
   ipcError,
   isReadOnlySkill,
+  type DocCheckReport,
+  type DocIssue,
   type SkillMeta,
   type TargetRow,
   type ToolDto,
@@ -20,9 +26,11 @@ import {
   type UpdateOutcome,
 } from "../api/ipc";
 import {
+  docValidate,
   queryKeys,
   useDeployApply,
   useDeployRevoke,
+  useDocSave,
   useOpenPath,
   useSecurityReport,
   useSkillDoc,
@@ -31,6 +39,7 @@ import {
   useUpdateApply,
   useUpdateCheck,
 } from "../api/queries";
+import DocEditor from "../components/DocEditor";
 import { Markdown } from "../components/Markdown";
 import { FindingList, RiskBadge } from "../components/SecurityKit";
 import { useToast } from "../components/Toast";
@@ -46,6 +55,18 @@ const ORIGIN_LABEL: Record<SkillMeta["originKind"], string> = {
 const MODE_LABEL: Record<TargetRow["mode"], string> = {
   symlink: "链接",
   copy: "副本",
+};
+
+/// §9.3 校验规则人话标签（底部问题列表用）。
+const DOC_RULE_LABEL: Record<string, string> = {
+  missing_name: "缺少 name",
+  invalid_name: "name 不合法",
+  name_mismatch: "name 与登记名不一致",
+  missing_description: "缺少 description",
+  short_description: "description 过短",
+  long_description: "description 过长",
+  unclosed_fence: "代码块未闭合",
+  missing_file: "引用文件缺失",
 };
 
 function shortRevision(rev: string | null): string {
@@ -69,12 +90,79 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   const apply = useUpdateApply();
   const deployApply = useDeployApply();
   const deployRevoke = useDeployRevoke();
+  const docSave = useDocSave();
   const openPath = useOpenPath();
   const toast = useToast();
   const qc = useQueryClient();
 
   const [checkResult, setCheckResult] = useState<UpdateCheckOutcome | null>(null);
   const [showApplyConfirm, setShowApplyConfirm] = useState(false);
+
+  // ------------------------------------------------------------------
+  // §9.3 编辑器：草稿 + 防抖实时校验（错误阻断保存、告警不阻断）
+  // ------------------------------------------------------------------
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [report, setReport] = useState<DocCheckReport | null>(null);
+  const [validating, setValidating] = useState(false);
+  /// 丢弃未保存草稿前的确认（取消编辑 / 返回列表都会触发）。
+  const [discardAction, setDiscardAction] = useState<null | (() => void)>(null);
+
+  const savedText = doc.data ?? "";
+  const dirty = editing && draft !== savedText;
+  const hasErrors = (report?.errors.length ?? 0) > 0;
+
+  /// 防抖 350ms 实时校验（零写盘；失败静默不标红——保存时后端仍是权威闸门）。
+  useEffect(() => {
+    if (!editing) {
+      return;
+    }
+    setValidating(true);
+    const timer = setTimeout(() => {
+      docValidate(skill.id, draft)
+        .then((r) => setReport(r))
+        .catch(() => setReport(null))
+        .finally(() => setValidating(false));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [editing, draft, skill.id]);
+
+  function startEdit() {
+    setDraft(savedText);
+    setReport(null);
+    setEditing(true);
+  }
+
+  function exitEdit() {
+    setEditing(false);
+    setReport(null);
+  }
+
+  /// 取消编辑 / 返回：草稿有未保存改动先确认，避免静默丢失。
+  function requestDiscard(action: () => void) {
+    if (dirty) {
+      setDiscardAction(() => action);
+    } else {
+      action();
+    }
+  }
+
+  function saveDoc() {
+    docSave.mutate(
+      { skillId: skill.id, contents: draft },
+      {
+        onSuccess: (outcome) => {
+          exitEdit();
+          if (outcome.indexError) {
+            toast.show(`已保存，但索引刷新失败：${outcome.indexError}`, "danger");
+          } else {
+            toast.show("已保存（旧版已自动备份为 SKILL.md.bak）", "success");
+          }
+        },
+        onError: (e) => toast.show(ipcError(e), "danger"),
+      },
+    );
+  }
 
   const readOnly = isReadOnlySkill(skill.canonicalPath, tools.data ?? []);
   const toolById = new Map<string, ToolDto>((tools.data ?? []).map((t) => [t.id, t]));
@@ -152,6 +240,29 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   // ------------------------------------------------------------------
   // 渲染
   // ------------------------------------------------------------------
+  /// §9.3 底部问题列表：错误（阻断保存）在前、告警（不阻断）在后；
+  /// 空态文案区分"校验中 / 通过 / 无问题"。
+  function renderDocIssueList() {
+    if (validating && !report) {
+      return <p className="text-xs text-ink-faint">正在校验…</p>;
+    }
+    const errors = report?.errors ?? [];
+    const warnings = report?.warnings ?? [];
+    if (errors.length === 0 && warnings.length === 0) {
+      return <p className="text-xs text-success">校验通过：frontmatter 完整，未发现其他问题。</p>;
+    }
+    return (
+      <div className="space-y-1.5">
+        {errors.map((issue, i) => (
+          <DocIssueRow key={`e${i}`} issue={issue} tone="danger" />
+        ))}
+        {warnings.map((issue, i) => (
+          <DocIssueRow key={`w${i}`} issue={issue} tone="blue" />
+        ))}
+      </div>
+    );
+  }
+
   /// 安全体检（§9.1）：打开详情页即扫描（纯静态，只提示不阻断安装）。
   function renderSecurityCard() {
     return (
@@ -300,7 +411,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
     <div className="flex min-h-0 flex-1 flex-col px-8 py-6">
       {/* 头部：返回 · 名称 · 徽章（来源 / 安全 / 只读） */}
       <div className="flex items-start gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={() => requestDiscard(onBack)}>
           <ArrowLeft size={14} />
           返回
         </Button>
@@ -318,30 +429,76 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
       </div>
 
       <div className="mt-4 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px] gap-3 overflow-hidden">
-        {/* 左列：SKILL.md 预览 */}
+        {/* 左列：SKILL.md 预览 / 编辑（§9.3） */}
         <section className="sb-card flex min-h-0 flex-col overflow-hidden p-0">
-          <h3 className="border-b border-line px-4 py-3 text-sm font-semibold text-ink">SKILL.md 预览</h3>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            {doc.isLoading ? (
-              <div className="space-y-2.5">
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <Skeleton key={i} className="h-4 w-full rounded-[4px]" />
-                ))}
-              </div>
-            ) : doc.isError ? (
-              <EmptyState
-                title="读取 SKILL.md 失败"
-                description={ipcError(doc.error)}
-                action={
-                  <Button variant="primary" size="sm" onClick={() => void qc.invalidateQueries({ queryKey: queryKeys.skillDoc(skill.id) })}>
-                    重试
-                  </Button>
-                }
-              />
+          <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
+            <h3 className="flex-1 text-sm font-semibold text-ink">
+              SKILL.md {editing ? "编辑" : "预览"}
+            </h3>
+            {editing ? (
+              <>
+                <span className="text-xs text-ink-faint">
+                  {validating ? "校验中…" : hasErrors ? "存在错误，保存被阻止" : "错误会阻止保存；告警不会"}
+                </span>
+                <Button size="sm" disabled={docSave.isPending} onClick={() => requestDiscard(exitEdit)}>
+                  <X size={13} />
+                  取消
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={docSave.isPending || hasErrors}
+                  onClick={saveDoc}
+                >
+                  <Save size={13} />
+                  保存
+                </Button>
+              </>
             ) : (
-              <Markdown source={doc.data ?? ""} />
+              <Button variant="secondary" size="sm" disabled={doc.isLoading || doc.isError} onClick={startEdit}>
+                <Pencil size={13} />
+                编辑
+              </Button>
             )}
           </div>
+          {editing ? (
+            <>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <DocEditor
+                  value={draft}
+                  onChange={setDraft}
+                  errors={report?.errors ?? []}
+                  warnings={report?.warnings ?? []}
+                />
+              </div>
+              {/* 底部问题列表：错误（红，阻断保存）+ 告警（蓝，不阻断） */}
+              <div className="max-h-40 shrink-0 overflow-y-auto border-t border-line px-4 py-2.5">
+                {renderDocIssueList()}
+              </div>
+            </>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {doc.isLoading ? (
+                <div className="space-y-2.5">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <Skeleton key={i} className="h-4 w-full rounded-[4px]" />
+                  ))}
+                </div>
+              ) : doc.isError ? (
+                <EmptyState
+                  title="读取 SKILL.md 失败"
+                  description={ipcError(doc.error)}
+                  action={
+                    <Button variant="primary" size="sm" onClick={() => void qc.invalidateQueries({ queryKey: queryKeys.skillDoc(skill.id) })}>
+                      重试
+                    </Button>
+                  }
+                />
+              ) : (
+                <Markdown source={doc.data ?? ""} />
+              )}
+            </div>
+          )}
         </section>
 
         {/* 右列：溯源 · 更新 · 部署状态 */}
@@ -417,6 +574,44 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
           {checkResult?.diffSummary ? " 上方已展示更新前 diff 摘要。" : ""}
         </p>
       </Modal>
+
+      {/* 丢弃未保存草稿确认（取消编辑 / 返回列表） */}
+      <Modal
+        open={discardAction !== null}
+        onClose={() => setDiscardAction(null)}
+        title="放弃未保存的修改？"
+        footer={
+          <>
+            <Button onClick={() => setDiscardAction(null)}>继续编辑</Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                discardAction?.();
+                setDiscardAction(null);
+              }}
+            >
+              放弃修改
+            </Button>
+          </>
+        }
+      >
+        <p>编辑器中还有未保存的改动，放弃后将无法找回（保存前的自动备份只在保存时生成）。</p>
+      </Modal>
+    </div>
+  );
+}
+
+/// 底部问题列表单行：行号 + 规则人话标签 + 后端原文说明。
+function DocIssueRow({ issue, tone }: { issue: DocIssue; tone: "danger" | "blue" }) {
+  return (
+    <div className="flex items-start gap-2 rounded-[8px] bg-surface px-2.5 py-1.5">
+      <Badge tone={tone} dot>
+        {DOC_RULE_LABEL[issue.rule] ?? issue.rule}
+      </Badge>
+      <p className="min-w-0 flex-1 text-xs leading-5 text-ink-secondary">
+        {issue.line > 0 && <span className="mr-1.5 font-mono text-ink-faint">第 {issue.line} 行</span>}
+        {issue.message}
+      </p>
     </div>
   );
 }

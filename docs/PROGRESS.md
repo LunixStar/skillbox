@@ -1,5 +1,58 @@
 # SkillBox 开发进度
 
+## Step 12 SKILL.md 编辑器（§9.3）：CodeMirror 6 + 元数据校验 + .bak + 增量重扫
+
+状态：完成
+
+做了：
+- **后端——校验行号化**（`engine/src/doc.rs` 重写，测试拆至 `doc/tests.rs`）：
+  - `DocIssue` 增加 `line: u32`（1 起始，0 = 无确切行）——行内标记数据源。
+  - `check_text` 行级重写：`name:`/`description:` 键定位到所在行；无 frontmatter 时锚点第 1 行；未闭合 ``` 围栏用**行级开合配对**（行首 ``` 切换）定位到未闭合围栏的**起始行**（不再整段奇偶计数）；缺失引用文件逐行提取 `](target)` 定位到引用行（同一目标只报首次）。
+  - 新增 `name_mismatch` 告警：frontmatter name 与登记名不一致时提示（索引与目录名不随编辑改名；keep-in-place 场景可能本来不同，故为告警非错误）。
+  - 新增 `validate_text`（公开入口）：校验编辑器中的**任意文本**，零写盘——实时校验数据源；`validate_meta` 增加 `expected_name` 参数。
+  - `doc_write` 拒绝信息带行号（`（第 N 行）`）。
+- **后端——增量重扫**（§9.3「编辑保存后触发一次该 skill 的增量重扫，不要全量」）：
+  - `rescan_after_doc_save`：只重算该 skill 的 frontmatter description + 内容哈希（`hash_dir`，≤1MB 文件精确）→ `index_store.refresh_skill` 刷新索引行；name / canonical_path / origin 不动；幂等（内容未变哈希稳定，有测试断言）。
+  - `DocWriteOutcome` 增加 `index_refreshed` / `index_error`（保存已成功、仅索引刷新失败时不谎报保存失败）。
+- **后端——IPC**（复用既有命令槽位，命令总数 32 不变）：
+  - `library_doc_validate` 增加 `contents: Option<String>`：给定时校验编辑器文本（实时），省略时校验盘上内容；两者均带登记名做 name_mismatch 告警。
+  - `library_doc_write`：写入成功（非 dry_run）后自动触发 `rescan_after_doc_save`。
+- **前端**：
+  - 依赖（§1 白名单内，**未引入 Monaco**）：`@uiw/react-codemirror` + `@codemirror/lang-markdown` + `@codemirror/lang-yaml`；诊断装饰经 @uiw 再导出的 `@codemirror/view`/`@codemirror/state` API，零额外依赖。
+  - `components/DocEditor.tsx`（新）：CodeMirror 6 编辑器——Markdown 高亮；```yaml/```yml 围栏用真 YAML 解析高亮；**YAML frontmatter 装饰高亮**（首段 `---` 区域底色 + `key:` 键着色 + `---` 淡显，与后端 frontmatter 判定同规则）；**校验行内标记**（StateField + Decoration：错误行红底红边、告警行蓝底蓝边，同行命中错误与告警时错误优先）。
+  - `pages/SkillDetailPage.tsx`：左列升级为**预览/编辑双模式**——「编辑」进入 CodeMirror，右上「保存 / 取消」；**防抖 350ms 实时校验**（`docValidate`，零写盘）；**底部问题列表**（错误红徽章在前、告警蓝徽章在后，行号 + 人话规则标签 + 后端原文说明；空态「校验通过」）；**错误阻断保存**（保存按钮禁用 + 后端 doc_write 权威双闸）；**告警不阻断**；未保存改动离开（取消/返回）先弹「放弃修改」确认，防静默丢失。
+  - `api/queries.ts`：`docValidate` 直连函数（高频调用不走 react-query）+ `useDocSave`（保存成功后统一失效 skillDoc / library / security / securityOverview / cost——**编辑→保存→UI 刷新链路**）。
+  - `api/ipc.ts`：DocIssue / DocCheckReport / DocWriteOutcome 类型镜像 + `libraryDocValidate(contents?)` 封装；`libraryDocWrite` 返回类型从 unknown 收紧为 DocWriteOutcome。
+  - `index.css`：frontmatter 与诊断样式（设计令牌 CSS 变量，无新颜色正本）。
+  - `dev/IPCTester.tsx`：doc 三命令参数更新（validate 带 contents 示例）。
+
+没做：
+- Markdown 工具栏（加粗/列表快捷按钮）——v1 编辑器已够用，避免堆功能。
+- 多标签/多文档同时编辑（单详情页单编辑器）。
+- .bak 恢复 UI（备份文件在正本目录，用户可手动恢复；回收站恢复 UI 属后续步骤）。
+
+自检输出（真实结果）：
+1. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 7.40s`，零警告
+2. `cargo test --workspace` → 205 passed / 0 failed（adapters 23、domain 6、engine 154、ports 9、store 13；doc 测试迁移 +3：行号断言、unclosed_fence 定位、name_mismatch、rescan 幂等/只刷可变列）
+3. `npm run build`（tsc --noEmit + vite）→ 通过（12.50s，2058 modules；修复 lang-markdown codeLanguages 需 Language 非 LanguageSupport 的 TS 错误）
+4. 核心五 crate `tauri::` grep → 0；全部 .rs ≤ 600 行（58 文件；doc.rs 419 / doc/tests.rs 292）
+5. IPC 命令 32 个 = §8 上限（doc_validate 加 contents 参数、doc_write 加增量重扫均为既有槽位内扩展）
+6. `cargo build --release -p skillbox-app`（touch main.rs 强制嵌入新 dist）→ **7.60 MB ≤ 12 MB**（3m38s）
+7. release exe 启动存活验证 → ALIVE（pid=16540，6 秒）后正常关闭
+8. DoD 链路：编辑→校验（validate_text 单测：错误/告警/行号）→保存（doc_write 单测：错误拒绝写入、.bak keep 1 轮换、dry_run 零写盘）→增量重扫（rescan 单测：description/hash 刷新、name/canonical_path 不动、幂等）→UI 刷新（useDocSave onSuccess 失效 5 个查询键，tsc 类型校验）。**UI 自动化验证不可用**：verify_ui 仅支持 HarmonyOS 工程，本项目为 Tauri 桌面应用；已在 `~/.codex/skills/editor-demo-skill` 备好手工验证数据。
+
+误报情形（已知，均为告警级不阻断）：
+- `unclosed_fence`：正文行首出现 ``` 字样会切换围栏开关——教学文档演示围栏语法（奇数个行首 ```）、```` 包裹 ``` 的嵌套示例可能误报；4+ 空格深缩进的 ``` 也会被当围栏（严格 Markdown 中是缩进代码块）。
+- `missing_file`：无 scheme 的裸域名链接 `](www.example.com)`、带查询串 `](file.md?x=1)`、示例模板链接会被当相对路径误报缺失。
+- 假阴性（漏报非误报）：`<img src>`、引用式链接 `[ref]: file.md`、行内代码中的路径不检查。
+- `name_mismatch`：keep-in-place 登记名来自目录名/覆盖名时与 frontmatter name 本来就可能不同——提示性质。
+- description 20–200 按 Unicode 字符数（CJK 1 字 = 1 字符）仅作建议。
+
+遗留风险 / 备案：
+- 编辑器实时校验为 350ms 防抖 IPC 调用（纯静态只读，实测廉价）；保存时后端 doc_write 仍是权威闸门，前端校验仅体验层。
+- 增量重扫失败（如 DB 锁）不回滚保存——文件已安全落盘（含 .bak），经 toast 提示 indexError，下次保存或更新检查会再次刷新索引。
+- CodeMirror 引入后前端 JS 包 353KB → 约 +120KB（gzip 后约 +40KB），release 总体积 7.60 MB 不变（≤12MB 预算内）。
+
 ## Step 11 安全扫描（§9.1 八条静态规则）+ 上下文成本面板（§9.2）
 
 状态：完成
