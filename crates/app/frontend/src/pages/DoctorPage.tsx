@@ -15,61 +15,55 @@ import { queryKeys, useDoctorFix, useDoctorReport, useOpenPath, useTools } from 
 import { useToast } from "../components/Toast";
 import { Badge, Button, EmptyState, Modal, Skeleton } from "../components/ui";
 import { useQueryClient } from "@tanstack/react-query";
+import { useI18n } from "../i18n";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "warning", "info"];
 
-const SEVERITY_META: Record<Severity, { label: string; tone: "danger" | "blue" | "neutral" }> = {
-  critical: { label: "严重问题", tone: "danger" },
-  warning: { label: "需要注意", tone: "blue" },
-  info: { label: "提示", tone: "neutral" },
+const SEVERITY_LABEL_KEY: Record<Severity, string> = {
+  critical: "doctor.severityCritical",
+  warning: "doctor.severityWarning",
+  info: "doctor.severityInfo",
 };
 
-/// 人话标题（不抛枚举名）：toolName 为空时省略工具前缀。
-const KIND_TITLE: Record<DiscrepancyKind, string> = {
-  unmanagedRealDir: "目录里有一个不是 SkillBox 管理的文件夹，它可能是你自己放的",
-  brokenLink: "部署链接指向的位置已经不存在了（悬空链接）",
-  foreignLink: "链接指向 SkillBox 中央库之外的地方，SkillBox 不会动它",
-  missingTarget: "记录里显示已部署，但磁盘上找不到",
-  unrecordedDeployment: "磁盘上有一个 SkillBox 风格的链接，但 SkillBox 没有它的记录",
-  copyDrift: "副本内容与中央库正本不一致（可能被手动改过）",
-  duplicateName: "多个目录里有同名但内容不同的 Skill",
+const SEVERITY_TONE: Record<Severity, "danger" | "blue" | "neutral"> = {
+  critical: "danger",
+  warning: "blue",
+  info: "neutral",
 };
 
-type IssueAction = { label: string; danger: boolean } | { label: string; viewDiff: true } | null;
+/// 人话标题 key（不抛枚举名）。
+const KIND_TITLE_KEY: Record<DiscrepancyKind, string> = {
+  unmanagedRealDir: "doctor.kind.unmanagedRealDir",
+  brokenLink: "doctor.kind.brokenLink",
+  foreignLink: "doctor.kind.foreignLink",
+  missingTarget: "doctor.kind.missingTarget",
+  unrecordedDeployment: "doctor.kind.unrecordedDeployment",
+  copyDrift: "doctor.kind.copyDrift",
+  duplicateName: "doctor.kind.duplicateName",
+};
+
+type IssueAction = { labelKey: string; danger: boolean } | { labelKey: string; viewDiff: true } | null;
 
 function issueAction(issue: DoctorIssue): IssueAction {
   const d = issue.discrepancy;
   switch (d.kind) {
     case "unmanagedRealDir":
-      return { label: "收编到中央库", danger: true };
+      return { labelKey: "doctor.action.adopt", danger: true };
     case "foreignLink":
-      return { label: "移除外来链接", danger: true };
+      return { labelKey: "doctor.action.removeForeign", danger: true };
     case "brokenLink":
       return d.suggestedFix === "rebuildLink"
-        ? { label: "重建链接", danger: false }
-        : { label: "移除悬空链接", danger: true };
+        ? { labelKey: "doctor.action.rebuild", danger: false }
+        : { labelKey: "doctor.action.removeBroken", danger: true };
     case "missingTarget":
-      return { label: "重新部署", danger: false };
+      return { labelKey: "doctor.action.redeploy", danger: false };
     case "unrecordedDeployment":
-      return { label: "补登记", danger: false };
+      return { labelKey: "doctor.action.record", danger: false };
     case "copyDrift":
-      return { label: "用正本更新副本", danger: true };
+      return { labelKey: "doctor.action.updateCopy", danger: true };
     case "duplicateName":
-      return { label: "查看差异", viewDiff: true };
+      return { labelKey: "doctor.action.viewDiff", viewDiff: true };
   }
-}
-
-function outcomeMessage(outcome: FixOutcome): { text: string; ok: boolean } {
-  if (outcome === "applied") {
-    return { text: "已修复", ok: true };
-  }
-  if ("skipped" in outcome) {
-    return { text: `已跳过：${outcome.skipped.reason}`, ok: false };
-  }
-  if ("failed" in outcome) {
-    return { text: `修复失败：${outcome.failed.reason}`, ok: false };
-  }
-  return { text: outcome.needsConfirmation.reason, ok: true };
 }
 
 export default function DoctorPage() {
@@ -80,14 +74,15 @@ export default function DoctorPage() {
   const openPath = useOpenPath();
   const toast = useToast();
   const qc = useQueryClient();
+  const { t, lang } = useI18n();
 
   const [pending, setPending] = useState<{ issue: DoctorIssue; impact: string } | null>(null);
   const [diffIssue, setDiffIssue] = useState<DoctorIssue | null>(null);
 
   const toolName = useMemo(() => {
     const m = new Map<string, string>();
-    for (const t of tools.data ?? []) {
-      m.set(t.id, t.displayName);
+    for (const x of tools.data ?? []) {
+      m.set(x.id, x.displayName);
     }
     return m;
   }, [tools.data]);
@@ -101,6 +96,19 @@ export default function DoctorPage() {
     }
     return by;
   }, [report.data]);
+
+  function outcomeMessage(outcome: FixOutcome): { text: string; ok: boolean } {
+    if (outcome === "applied") {
+      return { text: t("doctor.fixApplied"), ok: true };
+    }
+    if ("skipped" in outcome) {
+      return { text: t("doctor.fixSkipped", { reason: outcome.skipped.reason }), ok: false };
+    }
+    if ("failed" in outcome) {
+      return { text: t("doctor.fixFailed", { reason: outcome.failed.reason }), ok: false };
+    }
+    return { text: outcome.needsConfirmation.reason, ok: true };
+  }
 
   // ------------------------------------------------------------------
   // 修复流：dry-run 影响清单 → 逐个二次确认 → 执行（§6.3）。
@@ -162,9 +170,9 @@ export default function DoctorPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-sm font-medium text-ink">
               {tool ? `「${tool}」` : ""}
-              {KIND_TITLE[d.kind]}
+              {t(KIND_TITLE_KEY[d.kind])}
             </span>
-            {dangerous && <Badge tone="danger">危险项</Badge>}
+            {dangerous && <Badge tone="danger">{t("doctor.dangerBadge")}</Badge>}
           </div>
           <p className="mt-1 text-xs leading-5 text-ink-secondary">{d.detail}</p>
           <div className="mt-1.5 space-y-0.5">
@@ -174,7 +182,7 @@ export default function DoctorPage() {
               </div>
             ))}
             {paths.length > 3 && (
-              <div className="text-xs text-ink-faint">…及其他 {paths.length - 3} 个路径</div>
+              <div className="text-xs text-ink-faint">{t("doctor.morePaths", { n: paths.length - 3 })}</div>
             )}
           </div>
         </div>
@@ -182,7 +190,7 @@ export default function DoctorPage() {
           {action && "viewDiff" in action ? (
             <Button size="sm" onClick={() => setDiffIssue(issue)}>
               <Eye size={13} />
-              {action.label}
+              {t(action.labelKey)}
             </Button>
           ) : action ? (
             <Button
@@ -191,7 +199,7 @@ export default function DoctorPage() {
               disabled={dryFix.isPending || realFix.isPending}
               onClick={() => startFix(issue)}
             >
-              {action.label}
+              {t(action.labelKey)}
             </Button>
           ) : null}
         </div>
@@ -202,18 +210,19 @@ export default function DoctorPage() {
   // ------------------------------------------------------------------
   // 页面
   // ------------------------------------------------------------------
-  const lastRun = report.dataUpdatedAt > 0 ? new Date(report.dataUpdatedAt).toLocaleString("zh-CN") : null;
+  const locale = lang === "en" ? "en-US" : "zh-CN";
+  const lastRun = report.dataUpdatedAt > 0 ? new Date(report.dataUpdatedAt).toLocaleString(locale) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col px-8 py-6">
       {/* 顶栏：上次体检时间 + 重新体检（doctor 只读，随时可安全重跑） */}
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-ink">体检</h2>
+          <h2 className="text-base font-semibold text-ink">{t("doctor.title")}</h2>
           <p className="mt-0.5 text-xs text-ink-faint">
-            {lastRun ? `上次体检：${lastRun}` : "尚未体检"}
+            {lastRun ? t("doctor.lastRun", { time: lastRun }) : t("doctor.neverRun")}
             {report.data
-              ? ` · 已检查 ${report.data.checkedTools.length} 个工具 · 耗时 ${report.data.durationMs} ms`
+              ? t("doctor.checkedSuffix", { n: report.data.checkedTools.length, ms: report.data.durationMs })
               : ""}
           </p>
         </div>
@@ -224,18 +233,18 @@ export default function DoctorPage() {
           onClick={() => void report.refetch()}
         >
           <RefreshCw size={13} className={report.isFetching ? "animate-spin" : ""} />
-          {report.isFetching ? "体检中…" : "重新体检"}
+          {report.isFetching ? t("doctor.running") : t("doctor.rerun")}
         </Button>
       </div>
 
       <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto pr-0.5">
         {report.isError ? (
           <EmptyState
-            title="体检失败"
+            title={t("doctor.errorTitle")}
             description={ipcError(report.error)}
             action={
               <Button variant="primary" size="sm" onClick={() => void report.refetch()}>
-                重试
+                {t("common.retry")}
               </Button>
             }
           />
@@ -248,8 +257,8 @@ export default function DoctorPage() {
         ) : (report.data?.issues ?? []).length === 0 ? (
           <EmptyState
             icon={<CheckCircle2 size={22} />}
-            title="体检通过"
-            description="中央库与各工具的部署状态一致，没有发现需要处理的问题。"
+            title={t("doctor.allClearTitle")}
+            description={t("doctor.allClearDesc")}
           />
         ) : (
           SEVERITY_ORDER.map((sev) => {
@@ -257,15 +266,14 @@ export default function DoctorPage() {
             if (issues.length === 0) {
               return null;
             }
-            const meta = SEVERITY_META[sev];
             return (
               <section key={sev}>
                 <div className="mb-2 flex items-center gap-2">
                   {sev === "info" ? <Info size={14} className="text-ink-faint" /> : null}
-                  <Badge tone={meta.tone} dot>
-                    {meta.label}
+                  <Badge tone={SEVERITY_TONE[sev]} dot>
+                    {t(SEVERITY_LABEL_KEY[sev])}
                   </Badge>
-                  <span className="text-xs text-ink-faint">{issues.length} 项</span>
+                  <span className="text-xs text-ink-faint">{t("doctor.issueCount", { n: issues.length })}</span>
                 </div>
                 <div className="space-y-2.5">{issues.map(renderIssue)}</div>
               </section>
@@ -278,12 +286,18 @@ export default function DoctorPage() {
       <Modal
         open={pending !== null}
         onClose={() => setPending(null)}
-        title={pending ? `确认${issueAction(pending.issue)?.label ?? "修复"}` : ""}
+        title={
+          pending
+            ? t("doctor.confirmTitlePrefix", {
+                action: issueAction(pending.issue)?.labelKey ? t(issueAction(pending.issue)!.labelKey) : "",
+              })
+            : ""
+        }
         footer={
           <>
-            <Button onClick={() => setPending(null)}>再想想</Button>
+            <Button onClick={() => setPending(null)}>{t("common.holdOn")}</Button>
             <Button variant="danger" disabled={realFix.isPending} onClick={confirmFix}>
-              确认执行
+              {t("doctor.confirmRun")}
             </Button>
           </>
         }
@@ -292,7 +306,7 @@ export default function DoctorPage() {
           <>
             <p className="whitespace-pre-wrap">{pending.impact}</p>
             <div className="mt-3 space-y-1 border-t border-line pt-2.5">
-              <p className="text-xs text-ink-faint">将影响以下路径：</p>
+              <p className="text-xs text-ink-faint">{t("doctor.impactPaths")}</p>
               {[pending.issue.discrepancy.path, ...pending.issue.discrepancy.related].map((p) => (
                 <div key={p} className="truncate font-mono text-xs text-ink-secondary" title={p}>
                   {p}
@@ -307,7 +321,7 @@ export default function DoctorPage() {
       <Modal
         open={diffIssue !== null}
         onClose={() => setDiffIssue(null)}
-        title="查看差异"
+        title={t("doctor.viewDiffTitle")}
         footer={
           <>
             <Button
@@ -316,10 +330,10 @@ export default function DoctorPage() {
               }
             >
               <FolderOpen size={13} />
-              打开中央库
+              {t("common.openCentralLibrary")}
             </Button>
             <Button variant="primary" onClick={() => setDiffIssue(null)}>
-              关闭
+              {t("common.close")}
             </Button>
           </>
         }
@@ -334,10 +348,7 @@ export default function DoctorPage() {
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-ink-faint">
-              同名目录需要你自己决定以哪个为准：SkillBox 不会自动挑选正本，也不会改动这些目录。
-              可以在确认想保留的版本后，手动删除或改名其他版本。
-            </p>
+            <p className="mt-3 text-xs text-ink-faint">{t("doctor.viewDiffHint")}</p>
           </>
         )}
       </Modal>

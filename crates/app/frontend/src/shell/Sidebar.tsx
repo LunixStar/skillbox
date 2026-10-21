@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 import { ipcError } from "../api/ipc";
 import { useOpenPath } from "../api/queries";
 import { useToast } from "../components/Toast";
+import { useI18n } from "../i18n";
 
 export type ShellView =
   | "overview"
@@ -29,22 +30,22 @@ export type ShellView =
 
 interface NavItem {
   key: ShellView;
-  label: string;
+  labelKey: string;
   icon: ReactNode;
 }
 
 const MAIN_NAV: NavItem[] = [
-  { key: "overview", label: "概览", icon: <LayoutDashboard size={16} /> },
-  { key: "library", label: "技能库", icon: <LibraryIcon size={16} /> },
-  { key: "tools", label: "工具", icon: <Bot size={16} /> },
-  { key: "doctor", label: "体检", icon: <Stethoscope size={16} /> },
-  { key: "toolbox", label: "工具箱", icon: <ToolboxIcon size={16} /> },
-  { key: "settings", label: "设置", icon: <SettingsIcon size={16} /> },
+  { key: "overview", labelKey: "sidebar.overview", icon: <LayoutDashboard size={16} /> },
+  { key: "library", labelKey: "sidebar.library", icon: <LibraryIcon size={16} /> },
+  { key: "tools", labelKey: "sidebar.tools", icon: <Bot size={16} /> },
+  { key: "doctor", labelKey: "sidebar.doctor", icon: <Stethoscope size={16} /> },
+  { key: "toolbox", labelKey: "sidebar.toolbox", icon: <ToolboxIcon size={16} /> },
+  { key: "settings", labelKey: "sidebar.settings", icon: <SettingsIcon size={16} /> },
 ];
 
 const DEV_NAV: NavItem[] = [
-  { key: "design", label: "设计系统", icon: <Palette size={16} /> },
-  { key: "dev", label: "IPC Tester", icon: <FlaskConical size={16} /> },
+  { key: "design", labelKey: "sidebar.design", icon: <Palette size={16} /> },
+  { key: "dev", labelKey: "sidebar.ipcTester", icon: <FlaskConical size={16} /> },
 ];
 
 interface SidebarProps {
@@ -53,6 +54,7 @@ interface SidebarProps {
 }
 
 function NavButton({ item, active, onSelect }: { item: NavItem; active: boolean; onSelect: () => void }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -67,7 +69,7 @@ function NavButton({ item, active, onSelect }: { item: NavItem; active: boolean;
     >
       {active && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />}
       {item.icon}
-      {item.label}
+      {t(item.labelKey)}
     </button>
   );
 }
@@ -75,12 +77,13 @@ function NavButton({ item, active, onSelect }: { item: NavItem; active: boolean;
 export default function Sidebar({ view, onSelect }: SidebarProps) {
   const openPath = useOpenPath();
   const toast = useToast();
+  const { t } = useI18n();
 
   return (
     <aside className="flex w-48 shrink-0 flex-col border-r border-line bg-page">
       <div className="px-4 pt-5 pb-3">
         <div className="text-sm font-semibold text-ink">SkillBox</div>
-        <div className="mt-0.5 text-xs text-ink-faint">AI Agent Skills 管理器</div>
+        <div className="mt-0.5 text-xs text-ink-faint">{t("sidebar.subtitle")}</div>
       </div>
       <nav className="flex-1 space-y-0.5 px-2">
         {MAIN_NAV.map((item) => (
@@ -88,7 +91,7 @@ export default function Sidebar({ view, onSelect }: SidebarProps) {
         ))}
       </nav>
       <div className="space-y-0.5 border-t border-line px-2 py-2">
-        <div className="px-3 pt-1 pb-1 text-[10px] tracking-wider text-ink-faint">开发者</div>
+        <div className="px-3 pt-1 pb-1 text-[10px] tracking-wider text-ink-faint">{t("sidebar.devLabel")}</div>
         {DEV_NAV.map((item) => (
           <NavButton key={item.key} item={item} active={view === item.key} onSelect={() => onSelect(item.key)} />
         ))}
@@ -104,7 +107,7 @@ export default function Sidebar({ view, onSelect }: SidebarProps) {
           }
         >
           <FolderOpen size={16} />
-          打开中央库
+          {t("common.openCentralLibrary")}
         </button>
       </div>
     </aside>

@@ -17,6 +17,7 @@ import { ipcError } from "../api/ipc";
 import { useCompleteFirstRun, useDeployApply, useInstallLocal, useTools } from "../api/queries";
 import { Button, Skeleton, Toggle } from "../components/ui";
 import { useToast } from "../components/Toast";
+import { useI18n } from "../i18n";
 
 type Step = "welcome" | "scanning" | "summary" | "executing" | "done";
 
@@ -41,11 +42,12 @@ export default function FirstRun() {
   const deploy = useDeployApply();
   const complete = useCompleteFirstRun();
   const toast = useToast();
+  const { t } = useI18n();
 
   const toolNames = useMemo(() => {
     const m: Record<string, string> = {};
-    for (const t of toolsQuery.data ?? []) {
-      m[t.id] = t.displayName;
+    for (const x of toolsQuery.data ?? []) {
+      m[x.id] = x.displayName;
     }
     return m;
   }, [toolsQuery.data]);
@@ -160,7 +162,7 @@ export default function FirstRun() {
               dryRun: false,
             });
           }
-          results.push({ name: label, ok: true, detail: "已统一到中央库" });
+          results.push({ name: label, ok: true, detail: t("firstrun.resultUnified") });
         } else {
           await install.mutateAsync({
             path: s.path,
@@ -171,7 +173,7 @@ export default function FirstRun() {
           results.push({
             name: label,
             ok: true,
-            detail: s.readOnly ? "只读目录，已原地登记" : "已原地登记",
+            detail: s.readOnly ? t("firstrun.resultReadOnly") : t("firstrun.resultInPlace"),
           });
         }
       } catch (e) {
@@ -218,14 +220,9 @@ export default function FirstRun() {
       <div className="w-full max-w-2xl">
         {step === "welcome" && (
           <div className="sb-card interactive px-10 py-12 text-center">
-            <h1 className="text-2xl font-semibold text-ink">欢迎使用 SkillBox</h1>
-            <p className="mt-3 text-sm leading-6 text-ink-secondary">
-              SkillBox 帮你把散落在各个 AI 工具目录里的 Skill 集中登记、统一管理。
-              首先扫描你机器上的 Claude Code、Codex 等工具目录，找出已有的 Skill。
-            </p>
-            <p className="mt-1.5 text-xs leading-5 text-ink-faint">
-              首次运行只做两件事：扫描和登记。不会移动、修改或删除你的任何文件。
-            </p>
+            <h1 className="text-2xl font-semibold text-ink">{t("firstrun.welcomeTitle")}</h1>
+            <p className="mt-3 text-sm leading-6 text-ink-secondary">{t("firstrun.welcomeP1")}</p>
+            <p className="mt-1.5 text-xs leading-5 text-ink-faint">{t("firstrun.welcomeP2")}</p>
             <Button
               variant="primary"
               className="mt-8 h-9 px-6"
@@ -235,17 +232,17 @@ export default function FirstRun() {
                 setStep("scanning");
               }}
             >
-              开始扫描
+              {t("firstrun.startScan")}
             </Button>
           </div>
         )}
 
         {step === "scanning" && (
           <div className="sb-card interactive px-10 py-12">
-            <h2 className="text-lg font-semibold text-ink">正在扫描…</h2>
+            <h2 className="text-lg font-semibold text-ink">{t("firstrun.scanningTitle")}</h2>
             {error ? (
               <div className="mt-6">
-                <p className="text-sm text-danger">扫描失败：{error}</p>
+                <p className="text-sm text-danger">{t("common.scanFailed", { msg: error })}</p>
                 <div className="mt-5 flex gap-2">
                   <Button
                     variant="primary"
@@ -254,10 +251,10 @@ export default function FirstRun() {
                       setLive(null);
                     }}
                   >
-                    重试
+                    {t("common.retry")}
                   </Button>
                   <Button variant="ghost" onClick={() => setStep("welcome")}>
-                    返回
+                    {t("common.back")}
                   </Button>
                 </div>
               </div>
@@ -271,16 +268,13 @@ export default function FirstRun() {
                     <Skeleton className="h-5 w-64" />
                   ) : (
                     <>
-                      <div>
-                        已扫描 <span className="font-medium text-ink">{live.scanned}</span> 个目录
-                        · 已发现 <span className="font-medium text-ink">{live.found}</span> 个 Skill
-                      </div>
+                      <div>{t("firstrun.scanProgress", { scanned: live.scanned, found: live.found })}</div>
                       {Object.entries(live.foundByTool).map(([tool, n]) => (
                         <div key={tool} className="text-primary-active">
-                          发现 {toolNames[tool] ?? tool} ×{n}
+                          {t("firstrun.scanFoundTool", { tool: toolNames[tool] ?? tool, n })}
                         </div>
                       ))}
-                      <div className="truncate text-xs text-ink-faint">正在查看 {live.current}</div>
+                      <div className="truncate text-xs text-ink-faint">{t("firstrun.scanCurrent", { path: live.current })}</div>
                     </>
                   )}
                 </div>
@@ -293,7 +287,7 @@ export default function FirstRun() {
                     setStep("welcome");
                   }}
                 >
-                  取消扫描
+                  {t("firstrun.cancelScan")}
                 </Button>
               </>
             )}
@@ -303,26 +297,27 @@ export default function FirstRun() {
         {step === "summary" && report && (
           <div className="sb-card interactive px-8 py-8">
             <h2 className="text-lg font-semibold text-ink">
-              扫描完成，发现 {report.skills.length} 个 Skill
+              {t("firstrun.summaryTitle", { n: report.skills.length })}
             </h2>
             {(report.skipped.length > 0 || report.warnings.length > 0) && (
               <p className="mt-1 text-xs text-ink-faint">
-                另跳过 {report.skipped.length} 个目录 · {report.warnings.length} 条告警 · 耗时{" "}
-                {(report.durationMs / 1000).toFixed(1)}s
+                {t("firstrun.summaryMeta", {
+                  skipped: report.skipped.length,
+                  warnings: report.warnings.length,
+                  sec: (report.durationMs / 1000).toFixed(1),
+                })}
               </p>
             )}
 
             <div className="mt-5 max-h-72 space-y-4 overflow-y-auto pr-1">
               {foundGroups.length === 0 && (
-                <p className="text-sm text-ink-secondary">
-                  没有发现已有 Skill。你可以稍后在「技能库」手动登记。
-                </p>
+                <p className="text-sm text-ink-secondary">{t("firstrun.summaryNone")}</p>
               )}
               {foundGroups.map((g) => (
                 <div key={g.toolId ?? "central"}>
                   <div className="flex items-center justify-between">
                     <div className="text-xs font-semibold text-ink">
-                      {g.toolId ? toolNames[g.toolId] ?? g.toolId : "中央库 / 未知来源"}
+                      {g.toolId ? toolNames[g.toolId] ?? g.toolId : t("firstrun.centralGroup")}
                       <span className="ml-1.5 font-normal text-ink-faint">×{g.items.length}</span>
                     </div>
                     <button
@@ -343,7 +338,7 @@ export default function FirstRun() {
                         })
                       }
                     >
-                      全选 / 全不选
+                      {t("firstrun.toggleAll")}
                     </button>
                   </div>
                   <div className="mt-1.5 space-y-1">
@@ -363,7 +358,7 @@ export default function FirstRun() {
                             {s.name ?? s.dirName}
                             {s.readOnly && (
                               <span className="ml-2 rounded-[6px] bg-surface px-1.5 py-0.5 text-xs text-ink-faint">
-                                只读
+                                {t("common.readOnly")}
                               </span>
                             )}
                           </span>
@@ -379,25 +374,19 @@ export default function FirstRun() {
             </div>
 
             <div className="mt-6 rounded-card border border-line bg-surface px-4 py-3">
-              <Toggle
-                checked={unify}
-                onChange={setUnify}
-                label="统一到中央库（可选）"
-              />
+              <Toggle checked={unify} onChange={setUnify} label={t("firstrun.unifyTitle")} />
               <p className="mt-1.5 text-xs leading-5 text-ink-faint">
-                {unify
-                  ? "每个勾选的 Skill 将复制进中央库，并把原目录替换为指向正本的链接；原文件会先移入回收站（可恢复）。"
-                  : "默认原地登记：只记录位置，不移动、不修改任何文件。之后可随时从卡片上部署到各工具。"}
+                {unify ? t("firstrun.unifyOn") : t("firstrun.unifyOff")}
               </p>
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setStep("welcome")}>
-                上一步
+                {t("firstrun.prevStep")}
               </Button>
               {report.skills.length === 0 ? (
                 <Button variant="primary" onClick={() => setStep("done")}>
-                  完成
+                  {t("firstrun.done")}
                 </Button>
               ) : (
                 <Button
@@ -405,7 +394,8 @@ export default function FirstRun() {
                   disabled={selected.size === 0}
                   onClick={() => void runRegistration()}
                 >
-                  {unify ? "统一并登记" : "原地登记"} {selected.size} 个 Skill
+                  {(unify ? t("firstrun.unifyAndRegister") : t("firstrun.registerInPlace")) +
+                    t("firstrun.skillsCount", { n: selected.size })}
                 </Button>
               )}
             </div>
@@ -415,7 +405,7 @@ export default function FirstRun() {
         {step === "executing" && (
           <div className="sb-card interactive px-10 py-12">
             <h2 className="text-lg font-semibold text-ink">
-              正在登记… {execResults.length} / {execTotal}
+              {t("firstrun.execTitle", { done: execResults.length, total: execTotal })}
             </h2>
             <div className="mt-6 h-1.5 w-full overflow-hidden rounded-full bg-line">
               <div
@@ -436,17 +426,13 @@ export default function FirstRun() {
         {step === "done" && (
           <div className="sb-card interactive px-10 py-12 text-center">
             <h2 className="text-xl font-semibold text-ink">
-              {failCount === 0 ? "全部完成！" : "登记完成（部分失败）"}
+              {failCount === 0 ? t("firstrun.doneAllTitle") : t("firstrun.donePartialTitle")}
             </h2>
             {execResults.length > 0 && (
               <p className="mt-2 text-sm text-ink-secondary">
-                成功 {okCount} 个
-                {failCount > 0 && (
-                  <>
-                    ，失败 <span className="text-danger">{failCount}</span> 个
-                  </>
-                )}
-                。{unify ? "已统一到中央库。" : "已原地登记，文件位置保持不变。"}
+                {t("firstrun.doneOkCount", { n: okCount })}
+                {failCount > 0 && <span className="text-danger">{t("firstrun.doneFailCount", { n: failCount })}</span>}
+                {unify ? t("firstrun.doneUnifiedNote") : t("firstrun.doneInPlaceNote")}
               </p>
             )}
             {failCount > 0 && (
@@ -466,7 +452,7 @@ export default function FirstRun() {
               disabled={complete.isPending}
               onClick={() => complete.mutate(undefined, { onError: (e) => toast.show(ipcError(e), "danger") })}
             >
-              进入 SkillBox
+              {t("firstrun.enterApp")}
             </Button>
           </div>
         )}

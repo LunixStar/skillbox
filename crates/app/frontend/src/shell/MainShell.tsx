@@ -6,18 +6,10 @@ import IPCTester from "../dev/IPCTester";
 import DoctorPage from "../pages/DoctorPage";
 import LibraryPage from "../pages/LibraryPage";
 import OverviewPage from "../pages/OverviewPage";
-import PlaceholderPage from "../pages/PlaceholderPage";
+import SettingsPage from "../pages/SettingsPage";
 import ToolboxPage from "../pages/ToolboxPage";
 import ToolsPage from "../pages/ToolsPage";
 import Sidebar, { type ShellView } from "./Sidebar";
-
-const PLACEHOLDERS: Partial<Record<ShellView, { title: string; description: string; phase: string }>> = {
-  settings: {
-    title: "设置",
-    description: "中央库位置、扫描黑名单、语言等应用设置。",
-    phase: "Phase 4",
-  },
-};
 
 export default function MainShell() {
   const [view, setView] = useState<ShellView>("overview");
@@ -31,7 +23,7 @@ export default function MainShell() {
         {view === "tools" && <ToolsPage />}
         {view === "doctor" && <DoctorPage />}
         {view === "toolbox" && <ToolboxPage />}
-        {view === "settings" && <PlaceholderPage {...PLACEHOLDERS.settings!} />}
+        {view === "settings" && <SettingsPage />}
         {view === "design" && <DesignSystemPage />}
         {view === "dev" && <IPCTester />}
       </main>

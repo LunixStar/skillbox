@@ -8,23 +8,24 @@ import { ipcError, type ToolDto } from "../api/ipc";
 import { useOpenPath, useSetToolEnabled, useTools } from "../api/queries";
 import { Badge, Button, EmptyState, Skeleton, Toggle } from "../components/ui";
 import { useToast } from "../components/Toast";
+import { useI18n } from "../i18n";
 
 type FormFactor = ToolDto["formFactor"];
 
-const GROUP_LABEL: Record<FormFactor, string> = {
-  cli: "命令行（CLI）",
-  ide: "IDE · 桌面端",
-  editorPlugin: "编辑器插件",
-  terminalTui: "终端 TUI",
-  desktopAssistant: "桌面助手",
+const GROUP_LABEL_KEY: Record<FormFactor, string> = {
+  cli: "tools.group.cli",
+  ide: "tools.group.ide",
+  editorPlugin: "tools.group.editorPlugin",
+  terminalTui: "tools.group.terminalTui",
+  desktopAssistant: "tools.group.desktopAssistant",
 };
 
-const FORM_SHORT: Record<FormFactor, string> = {
-  cli: "CLI",
-  ide: "IDE",
-  editorPlugin: "插件",
-  terminalTui: "TUI",
-  desktopAssistant: "助手",
+const FORM_SHORT_KEY: Record<FormFactor, string> = {
+  cli: "tools.short.cli",
+  ide: "tools.short.ide",
+  editorPlugin: "tools.short.editorPlugin",
+  terminalTui: "tools.short.terminalTui",
+  desktopAssistant: "tools.short.desktopAssistant",
 };
 
 const GROUP_ORDER: FormFactor[] = ["cli", "ide", "editorPlugin", "terminalTui", "desktopAssistant"];
@@ -34,19 +35,20 @@ export default function ToolsPage() {
   const setEnabled = useSetToolEnabled();
   const openPath = useOpenPath();
   const toast = useToast();
+  const { t } = useI18n();
   const [showUndetected, setShowUndetected] = useState(false);
 
   if (tools.isError) {
     return (
       <div className="px-8 py-8">
-        <h1 className="text-lg font-semibold text-ink">工具</h1>
+        <h1 className="text-lg font-semibold text-ink">{t("tools.title")}</h1>
         <div className="mt-4 rounded-card border border-line bg-surface">
           <EmptyState
-            title="无法加载工具列表"
+            title={t("tools.errorTitle")}
             description={ipcError(tools.error)}
             action={
               <Button variant="primary" size="sm" onClick={() => tools.refetch()}>
-                重试
+                {t("common.retry")}
               </Button>
             }
           />
@@ -56,15 +58,13 @@ export default function ToolsPage() {
   }
 
   const all = tools.data ?? [];
-  const installed = all.filter((t) => t.installed);
-  const undetected = all.filter((t) => !t.installed);
+  const installed = all.filter((x) => x.installed);
+  const undetected = all.filter((x) => !x.installed);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-8 py-8">
-      <h1 className="text-lg font-semibold text-ink">工具</h1>
-      <p className="mt-1 text-xs text-ink-faint">
-        关闭的工具不参与扫描与部署。目录按钮在系统文件管理器中打开。
-      </p>
+      <h1 className="text-lg font-semibold text-ink">{t("tools.title")}</h1>
+      <p className="mt-1 text-xs text-ink-faint">{t("tools.subtitle")}</p>
 
       {tools.isLoading ? (
         <div className="mt-5 space-y-2">
@@ -74,64 +74,64 @@ export default function ToolsPage() {
         </div>
       ) : all.length === 0 ? (
         <div className="mt-4 rounded-card border border-line bg-surface">
-          <EmptyState title="未发现任何 AI 工具" description="安装 Claude Code 等工具后，重启应用即可自动识别。" />
+          <EmptyState title={t("tools.emptyTitle")} description={t("tools.emptyDesc")} />
         </div>
       ) : (
         <>
           {GROUP_ORDER.map((ff) => {
-            const group = installed.filter((t) => t.formFactor === ff);
+            const group = installed.filter((x) => x.formFactor === ff);
             if (group.length === 0) {
               return null;
             }
             return (
               <div key={ff} className="mt-6">
                 <div className="text-xs font-semibold tracking-wide text-ink-faint">
-                  {GROUP_LABEL[ff]}（{group.length}）
+                  {t(GROUP_LABEL_KEY[ff])}（{group.length}）
                 </div>
                 <div className="mt-2 space-y-1.5">
-                  {group.map((t) => (
+                  {group.map((x) => (
                     <div
-                      key={t.id}
+                      key={x.id}
                       className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-2.5"
                     >
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-primary-soft text-sm font-semibold text-primary-active">
-                        {t.icon || t.displayName.slice(0, 1)}
+                        {x.icon || x.displayName.slice(0, 1)}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-sm text-ink">
-                          {t.displayName}
-                          <Badge tone="neutral">{FORM_SHORT[t.formFactor]}</Badge>
+                          {x.displayName}
+                          <Badge tone="neutral">{t(FORM_SHORT_KEY[x.formFactor])}</Badge>
                           <Badge tone="success" dot>
-                            已检测
+                            {t("tools.detected")}
                           </Badge>
                         </div>
-                        <div className="truncate font-mono text-xs text-ink-faint" title={t.deployDir ?? ""}>
-                          {t.deployDir ?? "—"}
+                        <div className="truncate font-mono text-xs text-ink-faint" title={x.deployDir ?? ""}>
+                          {x.deployDir ?? "—"}
                         </div>
                       </div>
-                      {t.deployDir && (
+                      {x.deployDir && (
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() =>
-                            openPath.mutate(`tool:${t.id}`, {
+                            openPath.mutate(`tool:${x.id}`, {
                               onError: (e) => toast.show(ipcError(e), "danger"),
                             })
                           }
                         >
                           <FolderOpen size={14} />
-                          目录
+                          {t("tools.folder")}
                         </Button>
                       )}
                       <Toggle
-                        checked={t.enabled}
+                        checked={x.enabled}
                         onChange={(next) =>
                           setEnabled.mutate(
-                            { toolId: t.id, enabled: next },
+                            { toolId: x.id, enabled: next },
                             { onError: (e) => toast.show(ipcError(e), "danger") },
                           )
                         }
-                        label={t.enabled ? "启用" : "停用"}
+                        label={x.enabled ? t("tools.enabled") : t("tools.disabled")}
                       />
                     </div>
                   ))}
@@ -149,39 +149,37 @@ export default function ToolsPage() {
                 aria-expanded={showUndetected}
               >
                 {showUndetected ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                <span className="font-medium">未检测到（{undetected.length}）</span>
-                <span className="truncate text-xs text-ink-faint">
-                  该工具的配置目录不存在——启动一次该工具即可被检测到
-                </span>
+                <span className="font-medium">{t("tools.undetected", { n: undetected.length })}</span>
+                <span className="truncate text-xs text-ink-faint">{t("tools.undetectedHint")}</span>
               </button>
               {showUndetected && (
                 <div className="mt-1.5 space-y-1.5 sb-fade-enter">
                   {GROUP_ORDER.map((ff) => {
-                    const group = undetected.filter((t) => t.formFactor === ff);
+                    const group = undetected.filter((x) => x.formFactor === ff);
                     if (group.length === 0) {
                       return null;
                     }
                     return (
                       <div key={ff}>
                         <div className="px-1 pt-1 text-xs font-semibold tracking-wide text-ink-faint">
-                          {GROUP_LABEL[ff]}
+                          {t(GROUP_LABEL_KEY[ff])}
                         </div>
                         <div className="mt-1 space-y-1.5">
-                          {group.map((t) => (
+                          {group.map((x) => (
                             <div
-                              key={t.id}
+                              key={x.id}
                               className="flex items-center gap-3 rounded-card border border-dashed border-line bg-surface px-4 py-2 opacity-70"
                             >
                               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-surface text-sm font-semibold text-ink-faint">
-                                {t.icon || t.displayName.slice(0, 1)}
+                                {x.icon || x.displayName.slice(0, 1)}
                               </span>
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 text-sm text-ink">
-                                  {t.displayName}
-                                  <Badge tone="neutral">{FORM_SHORT[t.formFactor]}</Badge>
+                                  {x.displayName}
+                                  <Badge tone="neutral">{t(FORM_SHORT_KEY[x.formFactor])}</Badge>
                                 </div>
-                                <div className="truncate font-mono text-xs text-ink-faint" title={t.deployDir ?? ""}>
-                                  {t.deployDir ?? "—"}
+                                <div className="truncate font-mono text-xs text-ink-faint" title={x.deployDir ?? ""}>
+                                  {x.deployDir ?? "—"}
                                 </div>
                               </div>
                             </div>

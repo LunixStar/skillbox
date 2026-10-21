@@ -24,6 +24,7 @@ import {
 import { useToast } from "../components/Toast";
 import { FindingList, RiskBadge } from "../components/SecurityKit";
 import { Badge, Button, EmptyState, Skeleton, Tag } from "../components/ui";
+import { useI18n } from "../i18n";
 
 // ---------------------------------------------------------------------------
 // 安全扫描：逐 skill 体检（后端缓存聚合；纯静态，只提示不阻断）
@@ -31,6 +32,7 @@ import { Badge, Button, EmptyState, Skeleton, Tag } from "../components/ui";
 
 function SkillRiskRow({ skill }: { skill: SkillMeta }) {
   const report = useSecurityReport(skill.id);
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const findings = report.data?.findings ?? [];
   return (
@@ -47,7 +49,7 @@ function SkillRiskRow({ skill }: { skill: SkillMeta }) {
           <>
             <RiskBadge level={report.data?.riskLevel} scanned={!!report.data} />
             <span className="w-14 shrink-0 text-right text-xs text-ink-faint">
-              {findings.length > 0 ? `${findings.length} 项` : "—"}
+              {findings.length > 0 ? t("toolbox.findingsCount", { n: findings.length }) : "—"}
             </span>
           </>
         )}
@@ -66,6 +68,7 @@ function SecuritySection() {
   const overview = useSecurityOverview();
   const toast = useToast();
   const qc = useQueryClient();
+  const { t } = useI18n();
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
 
@@ -83,7 +86,7 @@ function SecuritySection() {
       }
       await qc.invalidateQueries({ queryKey: queryKeys.securityOverview });
       await qc.invalidateQueries({ queryKey: ["security"] });
-      toast.show(`已完成 ${skills.length} 个 Skill 的安全体检`, "success");
+      toast.show(t("toolbox.securityDoneToast", { n: skills.length }), "success");
     } catch (e) {
       toast.show(ipcError(e), "danger");
     } finally {
@@ -98,12 +101,14 @@ function SecuritySection() {
     <section className="sb-card p-4">
       <div className="flex items-center gap-2">
         <ShieldCheck size={15} className="text-primary" />
-        <h3 className="text-sm font-semibold text-ink">安全扫描</h3>
-        <Badge tone="neutral">静态规则 · 只提示不阻断</Badge>
+        <h3 className="text-sm font-semibold text-ink">{t("toolbox.securityTitle")}</h3>
+        <Badge tone="neutral">{t("toolbox.securityBadge")}</Badge>
         <div className="flex-1" />
         <Button variant="secondary" size="sm" disabled={scanning || total === 0} onClick={() => void rescanAll()}>
           <RefreshCw size={13} className={scanning ? "animate-spin" : ""} />
-          {scanning ? `体检中 ${progress.done}/${progress.total}` : "全部体检"}
+          {scanning
+            ? t("toolbox.securityScanning", { done: progress.done, total: progress.total })
+            : t("toolbox.securityRescanAll")}
         </Button>
       </div>
       {overview.isLoading ? (
@@ -113,8 +118,8 @@ function SecuritySection() {
           <RiskBadge level={overview.data?.riskLevel} scanned={(overview.data?.findings.length ?? 0) > 0} />
           <p className="text-xs leading-5 text-ink-secondary">
             {overviewFindings > 0
-              ? `共 ${overviewFindings} 条发现。逐个 Skill 的明细见下方列表。`
-              : "还没有已汇总的发现。点击「全部体检」对技能库做一轮纯静态扫描。"}
+              ? t("toolbox.securityFindingsSummary", { n: overviewFindings })
+              : t("toolbox.securityEmpty")}
           </p>
         </div>
       )}
@@ -122,7 +127,7 @@ function SecuritySection() {
         {library.isLoading ? (
           [0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-full rounded-[8px]" />)
         ) : total === 0 ? (
-          <p className="text-xs text-ink-faint">技能库为空。</p>
+          <p className="text-xs text-ink-faint">{t("toolbox.securityLibraryEmpty")}</p>
         ) : (
           (library.data ?? []).map((s) => <SkillRiskRow key={s.id} skill={s} />)
         )}
@@ -144,13 +149,14 @@ function ConflictCard({
 }) {
   const revoke = useDeployRevoke();
   const toast = useToast();
+  const { t } = useI18n();
   const toolName = toolById.get(group.members[0]?.toolId ?? "")?.displayName ?? group.members[0]?.toolId ?? "";
 
   function deactivate(skillId: number, toolId: string, name: string) {
     revoke.mutate(
       { skillId, tools: [toolId], dryRun: false },
       {
-        onSuccess: () => toast.show(`已停用「${name}」在 ${toolName} 的常驻`, "success"),
+        onSuccess: () => toast.show(t("toolbox.conflictDeactivatedToast", { skill: name, tool: toolName }), "success"),
         onError: (e) => toast.show(ipcError(e), "danger"),
       },
     );
@@ -159,9 +165,12 @@ function ConflictCard({
   return (
     <div className="rounded-[8px] border border-line bg-page p-2.5">
       <div className="flex items-center gap-1.5">
-        <Badge tone="blue">触发词冲突</Badge>
+        <Badge tone="blue">{t("toolbox.conflictBadge")}</Badge>
         <span className="text-xs text-ink-secondary">
-          {toolName} · 相似度 {(group.similarity * 100).toFixed(0)}%
+          {t("toolbox.conflictSimilarity", {
+            tool: toolName,
+            pct: (group.similarity * 100).toFixed(0),
+          })}
         </span>
       </div>
       {group.keywords.length > 0 && (
@@ -182,14 +191,12 @@ function ConflictCard({
               onClick={() => deactivate(m.skillId, m.toolId, m.name)}
             >
               <Unlink size={12} />
-              停用
+              {t("toolbox.conflictDeactivate")}
             </Button>
           </div>
         ))}
       </div>
-      <p className="mt-1.5 text-xs leading-4 text-ink-faint">
-        两个 description 高度相似时，触发词会互相争抢；停用其一可降低误触发。
-      </p>
+      <p className="mt-1.5 text-xs leading-4 text-ink-faint">{t("toolbox.conflictHint")}</p>
     </div>
   );
 }
@@ -198,19 +205,20 @@ function CostSection() {
   const cost = useCostReport();
   const tools = useTools();
   const targets = useTargets();
+  const { t } = useI18n();
 
-  const toolById = new Map<string, ToolDto>((tools.data ?? []).map((t) => [t.id, t]));
+  const toolById = new Map<string, ToolDto>((tools.data ?? []).map((x) => [x.id, x]));
   const perTool = cost.data?.perTool ?? [];
   const conflicts = cost.data?.conflicts ?? [];
-  const totalSkills = perTool.reduce((s, t) => s + t.skillCount, 0);
-  const totalTokens = perTool.reduce((s, t) => s + t.estimatedTokens, 0);
-  const maxTokens = Math.max(1, ...perTool.map((t) => t.estimatedTokens));
+  const totalSkills = perTool.reduce((s, x) => s + x.skillCount, 0);
+  const totalTokens = perTool.reduce((s, x) => s + x.estimatedTokens, 0);
+  const maxTokens = Math.max(1, ...perTool.map((x) => x.estimatedTokens));
 
   return (
     <section className="sb-card p-4">
       <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-ink">上下文成本</h3>
-        <Badge tone="neutral">估算值 · ~3.5 字符/token</Badge>
+        <h3 className="text-sm font-semibold text-ink">{t("toolbox.costTitle")}</h3>
+        <Badge tone="neutral">{t("toolbox.costBadge")}</Badge>
       </div>
       {cost.isLoading ? (
         <Skeleton className="mt-3 h-24 w-full rounded-[8px]" />
@@ -220,34 +228,34 @@ function CostSection() {
           <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-3">
             <div className="rounded-[8px] bg-surface px-3 py-2.5">
               <div className="text-lg font-semibold text-ink">{totalSkills}</div>
-              <div className="text-xs text-ink-faint">常驻 skill 总数（已启用工具）</div>
+              <div className="text-xs text-ink-faint">{t("toolbox.costTotalSkills")}</div>
             </div>
             <div className="rounded-[8px] bg-surface px-3 py-2.5">
               <div className="text-lg font-semibold text-ink">
                 {totalTokens.toLocaleString()}
-                <span className="ml-1 text-xs font-normal text-ink-faint">tokens（估）</span>
+                <span className="ml-1 text-xs font-normal text-ink-faint">{t("toolbox.costTokensEst")}</span>
               </div>
-              <div className="text-xs text-ink-faint">description 常驻成本估算</div>
+              <div className="text-xs text-ink-faint">{t("toolbox.costDescCost")}</div>
             </div>
           </div>
           {/* 按工具分组的条形图（纯 CSS，无图表库） */}
           <div className="mt-3 space-y-2 border-t border-line pt-3">
             {perTool.length === 0 ? (
-              <p className="text-xs text-ink-faint">没有已启用的工具。</p>
+              <p className="text-xs text-ink-faint">{t("toolbox.costNoTools")}</p>
             ) : (
-              perTool.map((t) => (
-                <div key={t.toolId} className="flex items-center gap-2">
-                  <span className="w-28 shrink-0 truncate text-xs text-ink-secondary" title={toolById.get(t.toolId)?.displayName ?? t.toolId}>
-                    {toolById.get(t.toolId)?.displayName ?? t.toolId}
+              perTool.map((x) => (
+                <div key={x.toolId} className="flex items-center gap-2">
+                  <span className="w-28 shrink-0 truncate text-xs text-ink-secondary" title={toolById.get(x.toolId)?.displayName ?? x.toolId}>
+                    {toolById.get(x.toolId)?.displayName ?? x.toolId}
                   </span>
                   <div className="h-4 min-w-0 flex-1 overflow-hidden rounded-[4px] bg-line">
                     <div
                       className="h-full rounded-[4px] bg-primary transition-transform duration-200 ease-skillbox"
-                      style={{ width: `${(t.estimatedTokens / maxTokens) * 100}%` }}
+                      style={{ width: `${(x.estimatedTokens / maxTokens) * 100}%` }}
                     />
                   </div>
                   <span className="w-32 shrink-0 text-right text-xs text-ink-faint">
-                    {t.skillCount} 个 · {t.estimatedTokens.toLocaleString()} tokens（估）
+                    {t("toolbox.costPerTool", { n: x.skillCount, tokens: x.estimatedTokens.toLocaleString() })}
                   </span>
                 </div>
               ))
@@ -255,10 +263,10 @@ function CostSection() {
           </div>
           {/* 冲突组 */}
           <div className="mt-3 border-t border-line pt-3">
-            <h4 className="text-xs font-semibold text-ink">触发词冲突风险组（Jaccard ≥ 0.35）</h4>
+            <h4 className="text-xs font-semibold text-ink">{t("toolbox.costConflictTitle")}</h4>
             <div className="mt-2 space-y-2">
               {conflicts.length === 0 ? (
-                <p className="text-xs text-ink-faint">未发现冲突风险的 description 组。</p>
+                <p className="text-xs text-ink-faint">{t("toolbox.costNoConflicts")}</p>
               ) : (
                 conflicts.map((g, i) => <ConflictCard key={i} group={g} toolById={toolById} />)
               )}
@@ -267,7 +275,7 @@ function CostSection() {
         </>
       )}
       {targets.isError && (
-        <p className="mt-2 text-xs text-danger">部署数据加载失败：{ipcError(targets.error)}</p>
+        <p className="mt-2 text-xs text-danger">{t("toolbox.targetsError", { msg: ipcError(targets.error) })}</p>
       )}
     </section>
   );
@@ -278,21 +286,19 @@ function CostSection() {
 // ---------------------------------------------------------------------------
 
 export default function ToolboxPage() {
+  const { t } = useI18n();
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-6">
       <div className="flex items-center gap-2">
-        <h2 className="text-base font-semibold text-ink">工具箱</h2>
-        <p className="text-xs text-ink-faint">专业功能折叠区：安全扫描与上下文成本分析。</p>
+        <h2 className="text-base font-semibold text-ink">{t("toolbox.title")}</h2>
+        <p className="text-xs text-ink-faint">{t("toolbox.subtitle")}</p>
       </div>
       <div className="mt-4 grid max-w-5xl grid-cols-1 items-start gap-3 xl:grid-cols-2">
         <SecuritySection />
         <CostSection />
       </div>
       <div className="mt-3 max-w-5xl">
-        <EmptyState
-          title="更多工具整理中"
-          description="日志导出、缓存与回收站管理将在后续版本加入工具箱。"
-        />
+        <EmptyState title={t("toolbox.moreTitle")} description={t("toolbox.moreDesc")} />
       </div>
     </div>
   );

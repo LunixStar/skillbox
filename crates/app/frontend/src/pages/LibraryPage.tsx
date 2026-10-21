@@ -30,8 +30,10 @@ import {
 } from "../api/queries";
 import VirtualList from "../components/VirtualList";
 import { RiskBadge } from "../components/SecurityKit";
+import { ScanResultModal, ScanRunningModal, TagFilterModal } from "../components/ScanModals";
 import { useToast } from "../components/Toast";
 import { Badge, Button, EmptyState, Modal, Skeleton } from "../components/ui";
+import { useI18n } from "../i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import SkillDetailPage from "./SkillDetailPage";
 
@@ -45,14 +47,14 @@ type Confirm =
   | { kind: "delete"; skill: SkillMeta; toolIds: string[] }
   | null;
 
-const ORIGIN_LABEL: Record<SkillMeta["originKind"], string> = {
-  local: "本地",
-  git: "Git",
-  archive: "压缩包",
+const ORIGIN_LABEL_KEY: Record<SkillMeta["originKind"], string> = {
+  local: "common.origin.local",
+  git: "common.origin.git",
+  archive: "common.origin.archive",
 };
 
-function toolBadgeLabel(t: ToolDto): string {
-  return (t.icon || t.displayName).slice(0, 2);
+function toolBadgeLabel(x: ToolDto): string {
+  return (x.icon || x.displayName).slice(0, 2);
 }
 
 /// 卡片 / 行内的风险徽章：挂载即触发纯静态扫描（后端缓存，幂等廉价）。
@@ -71,6 +73,7 @@ export default function LibraryPage() {
   const install = useInstallLocal();
   const toast = useToast();
   const qc = useQueryClient();
+  const { t } = useI18n();
 
   const [search, setSearch] = useState("");
   const [origin, setOrigin] = useState<OriginFilter>("all");
@@ -98,23 +101,23 @@ export default function LibraryPage() {
   // 部署意图索引：skillId → 已部署工具集合。
   const deployedBySkill = useMemo(() => {
     const m = new Map<number, Set<string>>();
-    for (const t of targets.data ?? []) {
-      const set = m.get(t.skillId) ?? new Set<string>();
-      set.add(t.toolId);
-      m.set(t.skillId, set);
+    for (const x of targets.data ?? []) {
+      const set = m.get(x.skillId) ?? new Set<string>();
+      set.add(x.toolId);
+      m.set(x.skillId, set);
     }
     return m;
   }, [targets.data]);
 
   // 可部署工具：已启用 + 已安装。
   const deployableTools = useMemo(
-    () => (tools.data ?? []).filter((t) => t.enabled && t.installed),
+    () => (tools.data ?? []).filter((x) => x.enabled && x.installed),
     [tools.data],
   );
   const toolById = useMemo(() => {
     const m = new Map<string, ToolDto>();
-    for (const t of tools.data ?? []) {
-      m.set(t.id, t);
+    for (const x of tools.data ?? []) {
+      m.set(x.id, x);
     }
     return m;
   }, [tools.data]);
@@ -160,7 +163,7 @@ export default function LibraryPage() {
           window.clearInterval(timer);
           if (!cancelled) {
             setRescan({ phase: "idle" });
-            toast.show(`扫描失败：${m}`, "danger");
+            toast.show(t("common.scanFailed", { msg: m }), "danger");
           }
         },
       });
@@ -196,7 +199,7 @@ export default function LibraryPage() {
       off?.();
       window.clearInterval(timer);
     };
-  }, [rescan.phase, toast]);
+  }, [rescan.phase, toast, t]);
 
   // 重新扫描结果：哪些发现目录尚未入库。
   const unregistered = useMemo(() => {
@@ -207,8 +210,8 @@ export default function LibraryPage() {
     for (const s of library.data ?? []) {
       known.add(s.canonicalPath);
     }
-    for (const t of targets.data ?? []) {
-      known.add(t.path);
+    for (const x of targets.data ?? []) {
+      known.add(x.path);
     }
     return rescan.report.skills.filter((s) => !known.has(s.path));
   }, [rescan, library.data, targets.data]);
@@ -220,7 +223,7 @@ export default function LibraryPage() {
     deployApply.mutate(
       { skillId: skill.id, tools: [toolId], mode: "symlink", overwrite: false, dryRun: false },
       {
-        onSuccess: () => toast.show(`已部署到 ${toolById.get(toolId)?.displayName ?? toolId}`, "success"),
+        onSuccess: () => toast.show(t("common.deployToast", { tool: toolById.get(toolId)?.displayName ?? toolId }), "success"),
         onError: (e) => toast.show(ipcError(e), "danger"),
       },
     );
@@ -234,7 +237,11 @@ export default function LibraryPage() {
       deployRevoke.mutate(
         { skillId: confirm.skill.id, tools: [confirm.toolId], dryRun: false },
         {
-          onSuccess: () => toast.show(`已取消部署到 ${toolById.get(confirm.toolId)?.displayName ?? confirm.toolId}`, "success"),
+          onSuccess: () =>
+            toast.show(
+              t("common.revokeToast", { tool: toolById.get(confirm.toolId)?.displayName ?? confirm.toolId }),
+              "success",
+            ),
           onError: (e) => toast.show(ipcError(e), "danger"),
         },
       );
@@ -242,7 +249,7 @@ export default function LibraryPage() {
       deployRevoke.mutate(
         { skillId: confirm.skill.id, tools: [], dryRun: false },
         {
-          onSuccess: () => toast.show(`已取消「${confirm.skill.name}」的全部部署`, "success"),
+          onSuccess: () => toast.show(t("library.revokeAllToast", { skill: confirm.skill.name }), "success"),
           onError: (e) => toast.show(ipcError(e), "danger"),
         },
       );
@@ -250,7 +257,7 @@ export default function LibraryPage() {
       removeSkill.mutate(
         { skillId: confirm.skill.id, mode: "delete", dryRun: false },
         {
-          onSuccess: () => toast.show(`「${confirm.skill.name}」正本已移入回收站`, "success"),
+          onSuccess: () => toast.show(t("library.deleteToast", { skill: confirm.skill.name }), "success"),
           onError: (e) => toast.show(ipcError(e), "danger"),
         },
       );
@@ -263,7 +270,7 @@ export default function LibraryPage() {
       { path, name, keepInPlace: true, dryRun: false },
       {
         onSuccess: () => {
-          toast.show("已原地登记", "success");
+          toast.show(t("library.registeredToast"), "success");
           void qc.invalidateQueries({ queryKey: queryKeys.library });
           void qc.invalidateQueries({ queryKey: queryKeys.targets });
         },
@@ -278,19 +285,19 @@ export default function LibraryPage() {
   function agentBadges(skill: SkillMeta) {
     const deployed = deployedBySkill.get(skill.id) ?? new Set<string>();
     const readOnly = readOnlyById.get(skill.id) ?? false;
-    return deployableTools.map((t) => {
-      const isDeployed = deployed.has(t.id);
+    return deployableTools.map((x) => {
+      const isDeployed = deployed.has(x.id);
       return (
         <button
-          key={t.id}
+          key={x.id}
           type="button"
           disabled={readOnly && !isDeployed}
           title={
             readOnly
-              ? "只读来源（插件缓存），不可部署"
+              ? t("library.badgeReadOnlyTitle")
               : isDeployed
-                ? `已部署到 ${t.displayName}，点击取消部署`
-                : `点击部署到 ${t.displayName}`
+                ? t("library.badgeDeployedTitle", { tool: x.displayName })
+                : t("library.badgeDeployTitle", { tool: x.displayName })
           }
           className={[
             "inline-flex h-6 items-center rounded-tag px-2 text-xs font-semibold transition-colors duration-120",
@@ -301,13 +308,13 @@ export default function LibraryPage() {
           onClick={(e) => {
             e.stopPropagation();
             if (isDeployed) {
-              setConfirm({ kind: "revokeTool", skill, toolId: t.id });
+              setConfirm({ kind: "revokeTool", skill, toolId: x.id });
             } else if (!readOnly) {
-              applyOne(skill, t.id);
+              applyOne(skill, x.id);
             }
           }}
         >
-          {toolBadgeLabel(t)}
+          {toolBadgeLabel(x)}
         </button>
       );
     });
@@ -324,7 +331,7 @@ export default function LibraryPage() {
           onClick={() => setConfirm({ kind: "revokeAll", skill, toolIds: deployedTools })}
         >
           <Unlink size={13} />
-          取消部署{deployedTools.length > 0 && `（${deployedTools.length}）`}
+          {deployedTools.length > 0 ? t("library.undeployCount", { n: deployedTools.length }) : t("library.undeploy")}
         </Button>
         <Button
           variant="ghost"
@@ -334,7 +341,7 @@ export default function LibraryPage() {
           onClick={() => setConfirm({ kind: "delete", skill, toolIds: deployedTools })}
         >
           <Trash2 size={13} />
-          删除 Skill
+          {t("library.deleteSkill")}
         </Button>
       </>
     );
@@ -352,13 +359,13 @@ export default function LibraryPage() {
             {skill.name}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
-            {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">只读</Badge>}
+            <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{t(ORIGIN_LABEL_KEY[skill.originKind])}</Badge>
+            {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">{t("common.readOnly")}</Badge>}
             <CardRiskBadge skillId={skill.id} />
           </div>
         </div>
         <p className="mt-1.5 line-clamp-2 min-h-8 text-xs leading-4 text-ink-secondary">
-          {skill.description || "（无描述）"}
+          {skill.description || t("common.noDescription")}
         </p>
         <div className="mt-2.5 flex items-center gap-1.5">{agentBadges(skill)}</div>
         <div className="mt-3 flex items-center gap-1 border-t border-line pt-2.5">
@@ -378,8 +385,8 @@ export default function LibraryPage() {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm text-ink">{skill.name}</span>
-            <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
-            {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">只读</Badge>}
+            <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{t(ORIGIN_LABEL_KEY[skill.originKind])}</Badge>
+            {(readOnlyById.get(skill.id) ?? false) && <Badge tone="danger">{t("common.readOnly")}</Badge>}
             <CardRiskBadge skillId={skill.id} />
           </div>
           <div className="truncate text-xs text-ink-faint">{skill.description || skill.canonicalPath}</div>
@@ -409,7 +416,7 @@ export default function LibraryPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索名称 / 描述 / 来源"
+            placeholder={t("library.searchPlaceholder")}
             className="h-8 w-56 rounded-btn border border-line bg-page pl-8 pr-3 text-sm text-ink placeholder:text-ink-faint focus:border-primary focus:outline-none"
           />
         </div>
@@ -423,12 +430,12 @@ export default function LibraryPage() {
               }`}
               onClick={() => setOrigin(f)}
             >
-              {f === "all" ? "全部" : ORIGIN_LABEL[f]}
+              {f === "all" ? t("library.filterAll") : t(ORIGIN_LABEL_KEY[f])}
             </button>
           ))}
         </div>
         <Button variant="ghost" size="sm" onClick={() => setShowTags(true)}>
-          标签
+          {t("library.tagFilterTitle")}
         </Button>
         <div className="flex-1" />
         <div className="flex items-center gap-0.5 rounded-btn border border-line bg-page p-0.5">
@@ -441,7 +448,7 @@ export default function LibraryPage() {
             <button
               key={mode}
               type="button"
-              aria-label={mode === "grid" ? "网格视图" : "列表视图"}
+              aria-label={mode === "grid" ? t("library.gridView") : t("library.listView")}
               className={`flex h-7 w-8 items-center justify-center rounded-[6px] transition-colors duration-120 ${
                 viewMode === mode ? "bg-primary-soft text-primary-active" : "text-ink-faint hover:bg-surface"
               }`}
@@ -458,7 +465,7 @@ export default function LibraryPage() {
           onClick={() => setRescan({ phase: "running", live: null })}
         >
           <RefreshCw size={13} className={rescan.phase === "running" ? "animate-spin" : ""} />
-          {rescan.phase === "running" ? "扫描中…" : "扫描"}
+          {rescan.phase === "running" ? t("library.scanning") : t("library.scan")}
         </Button>
       </div>
 
@@ -466,11 +473,11 @@ export default function LibraryPage() {
       <div className="mt-4 min-h-0 flex-1">
         {error ? (
           <EmptyState
-            title="数据加载失败"
+            title={t("library.errorTitle")}
             description={ipcError(error)}
             action={
               <Button variant="primary" size="sm" onClick={() => void qc.invalidateQueries()}>
-                重试
+                {t("common.retry")}
               </Button>
             }
           />
@@ -490,16 +497,16 @@ export default function LibraryPage() {
           )
         ) : (library.data ?? []).length === 0 ? (
           <EmptyState
-            title="技能库还是空的"
-            description="运行一次扫描，把各 AI 工具目录里已有的 Skill 登记进来。"
+            title={t("library.emptyTitle")}
+            description={t("library.emptyDesc")}
             action={
               <Button variant="primary" size="sm" onClick={() => setRescan({ phase: "running", live: null })}>
-                开始扫描
+                {t("library.startScan")}
               </Button>
             }
           />
         ) : filtered.length === 0 ? (
-          <EmptyState title="没有匹配的 Skill" description="试试更换关键词或来源过滤条件。" />
+          <EmptyState title={t("library.noMatchTitle")} description={t("library.noMatchDesc")} />
         ) : viewMode === "grid" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
             {filtered.map(renderCard)}
@@ -520,88 +527,50 @@ export default function LibraryPage() {
       </div>
 
       {/* 标签过滤（v1：skill_tags 暂无写入来源，诚实空态） */}
-      <Modal open={showTags} onClose={() => setShowTags(false)} title="标签过滤">
-        <EmptyState title="暂无标签" description="标签编辑将在后续版本提供；当前可用来源过滤缩小范围。" />
-      </Modal>
+      <TagFilterModal open={showTags} onClose={() => setShowTags(false)} />
 
       {/* 重新扫描结果 */}
-      <Modal
-        open={rescan.phase === "result"}
-        onClose={() => setRescan({ phase: "idle" })}
-        title="扫描完成"
-        footer={
-          <Button variant="primary" onClick={() => setRescan({ phase: "idle" })}>
-            关闭
-          </Button>
-        }
-      >
-        {rescan.phase === "result" && (
-          <>
-            <p>
-              发现 {rescan.report.skills.length} 个 Skill 目录，其中{" "}
-              {rescan.report.skills.length - unregistered.length} 个已入库。
-              {rescan.report.skills.length - unregistered.length > 0 && " 已入库的目录未做任何改动。"}
-            </p>
-            {unregistered.length > 0 && (
-              <div className="mt-3 space-y-1.5">
-                <p className="text-xs text-ink-faint">以下目录尚未登记（登记不会移动文件）：</p>
-                <div className="max-h-44 space-y-1 overflow-y-auto">
-                  {unregistered.map((s) => (
-                    <div key={s.path} className="flex items-center gap-2 rounded-[8px] bg-surface px-2.5 py-1.5">
-                      <span className="min-w-0 flex-1 truncate text-xs text-ink">{s.name ?? s.dirName}</span>
-                      <Button size="sm" onClick={() => registerDiscovered(s.path, s.name)}>
-                        登记
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
+      {rescan.phase === "result" && (
+        <ScanResultModal
+          report={rescan.report}
+          unregistered={unregistered}
+          onClose={() => setRescan({ phase: "idle" })}
+          onRegister={registerDiscovered}
+        />
+      )}
 
       {/* 重新扫描运行中提示 */}
-      <Modal open={rescan.phase === "running"} onClose={() => setRescan({ phase: "idle" })} title="正在扫描…">
-        {rescan.phase === "running" && (
-          <>
-            <div className="sb-pulse h-1.5 w-full overflow-hidden rounded-full bg-line">
-              <div className="h-full w-1/3 rounded-full bg-primary" />
-            </div>
-            <p className="mt-3">
-              {rescan.live
-                ? `已扫描 ${rescan.live.scanned} 个目录 · 已发现 ${rescan.live.found} 个 Skill`
-                : "正在启动扫描…"}
-            </p>
-          </>
-        )}
-      </Modal>
+      {rescan.phase === "running" && (
+        <ScanRunningModal live={rescan.live} onClose={() => setRescan({ phase: "idle" })} />
+      )}
 
       {/* 两级删除语义：一级「取消部署」 */}
       <Modal
         open={confirm?.kind === "revokeTool" || confirm?.kind === "revokeAll"}
         onClose={() => setConfirm(null)}
-        title="取消部署"
+        title={t("library.revokeTitle")}
         footer={
           <>
-            <Button onClick={() => setConfirm(null)}>再想想</Button>
+            <Button onClick={() => setConfirm(null)}>{t("common.holdOn")}</Button>
             <Button variant="primary" onClick={runConfirm}>
-              确认取消部署
+              {t("library.revokeOk")}
             </Button>
           </>
         }
       >
         {confirm?.kind === "revokeTool" && (
           <p>
-            将移除「{confirm.skill.name}」在{" "}
-            {toolById.get(confirm.toolId)?.displayName ?? confirm.toolId} 的部署（链接 / 副本移入回收站）。
-            <span className="font-medium text-ink">正本仍在中央库，随时可重新部署。</span>
+            {t("library.revokeOne", {
+              skill: confirm.skill.name,
+              tool: toolById.get(confirm.toolId)?.displayName ?? confirm.toolId,
+            })}
+            <span className="font-medium text-ink">{t("library.revokeNote")}</span>
           </p>
         )}
         {confirm?.kind === "revokeAll" && (
           <p>
-            将移除「{confirm.skill.name}」在 {confirm.toolIds.length} 个工具的部署（链接 / 副本移入回收站）。
-            <span className="font-medium text-ink">正本仍在中央库，随时可重新部署。</span>
+            {t("library.revokeAll", { skill: confirm.skill.name, n: confirm.toolIds.length })}
+            <span className="font-medium text-ink">{t("library.revokeNote")}</span>
           </p>
         )}
       </Modal>
@@ -610,22 +579,22 @@ export default function LibraryPage() {
       <Modal
         open={confirm?.kind === "delete"}
         onClose={() => setConfirm(null)}
-        title="删除 Skill"
+        title={t("library.deleteTitle")}
         footer={
           <>
-            <Button onClick={() => setConfirm(null)}>取消</Button>
+            <Button onClick={() => setConfirm(null)}>{t("common.cancel")}</Button>
             <Button variant="danger" onClick={runConfirm}>
-              确认删除
+              {t("library.deleteOk")}
             </Button>
           </>
         }
       >
         {confirm?.kind === "delete" && (
           <p>
-            即将删除「{confirm.skill.name}」：
-            {confirm.toolIds.length > 0 ? `撤销它在 ${confirm.toolIds.length} 个工具的部署；` : ""}
-            正本将移入回收站，可在后续版本的「工具箱」中恢复。
-            <span className="font-medium text-ink">此操作不会直接抹除文件。</span>
+            {t("library.deleteBodyPrefix", { skill: confirm.skill.name })}
+            {confirm.toolIds.length > 0 && t("library.deleteBodyRevoke", { n: confirm.toolIds.length })}
+            {t("library.deleteBodyTrash")}
+            <span className="font-medium text-ink">{t("library.deleteBodyNote")}</span>
           </p>
         )}
       </Modal>

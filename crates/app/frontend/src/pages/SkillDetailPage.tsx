@@ -18,7 +18,6 @@ import {
   ipcError,
   isReadOnlySkill,
   type DocCheckReport,
-  type DocIssue,
   type SkillMeta,
   type TargetRow,
   type ToolDto,
@@ -40,41 +39,30 @@ import {
   useUpdateCheck,
 } from "../api/queries";
 import DocEditor from "../components/DocEditor";
+import { DocIssueList } from "../components/DocIssueList";
 import { Markdown } from "../components/Markdown";
 import { FindingList, RiskBadge } from "../components/SecurityKit";
 import { useToast } from "../components/Toast";
 import { Badge, Button, EmptyState, Modal, Skeleton } from "../components/ui";
+import { useI18n } from "../i18n";
 import { useQueryClient } from "@tanstack/react-query";
 
-const ORIGIN_LABEL: Record<SkillMeta["originKind"], string> = {
-  local: "本地",
-  git: "Git",
-  archive: "压缩包",
+const ORIGIN_LABEL_KEY: Record<SkillMeta["originKind"], string> = {
+  local: "common.origin.local",
+  git: "common.origin.git",
+  archive: "common.origin.archive",
 };
 
-const MODE_LABEL: Record<TargetRow["mode"], string> = {
-  symlink: "链接",
-  copy: "副本",
+const MODE_LABEL_KEY: Record<TargetRow["mode"], string> = {
+  symlink: "detail.modeSymlink",
+  copy: "detail.modeCopy",
 };
 
-/// §9.3 校验规则人话标签（底部问题列表用）。
-const DOC_RULE_LABEL: Record<string, string> = {
-  missing_name: "缺少 name",
-  invalid_name: "name 不合法",
-  name_mismatch: "name 与登记名不一致",
-  missing_description: "缺少 description",
-  short_description: "description 过短",
-  long_description: "description 过长",
-  unclosed_fence: "代码块未闭合",
-  missing_file: "引用文件缺失",
+const ORIGIN_REF_LABEL_KEY: Record<SkillMeta["originKind"], string> = {
+  local: "detail.originPath",
+  git: "detail.originRepo",
+  archive: "detail.originArchive",
 };
-
-function shortRevision(rev: string | null): string {
-  if (!rev) {
-    return "（未记录）";
-  }
-  return rev.length > 12 ? `${rev.slice(0, 12)}…` : rev;
-}
 
 interface SkillDetailPageProps {
   skill: SkillMeta;
@@ -94,6 +82,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   const openPath = useOpenPath();
   const toast = useToast();
   const qc = useQueryClient();
+  const { t } = useI18n();
 
   const [checkResult, setCheckResult] = useState<UpdateCheckOutcome | null>(null);
   const [showApplyConfirm, setShowApplyConfirm] = useState(false);
@@ -154,9 +143,9 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
         onSuccess: (outcome) => {
           exitEdit();
           if (outcome.indexError) {
-            toast.show(`已保存，但索引刷新失败：${outcome.indexError}`, "danger");
+            toast.show(t("detail.saveIndexError", { msg: outcome.indexError }), "danger");
           } else {
-            toast.show("已保存（旧版已自动备份为 SKILL.md.bak）", "success");
+            toast.show(t("detail.saveOk"), "success");
           }
         },
         onError: (e) => toast.show(ipcError(e), "danger"),
@@ -165,10 +154,10 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   }
 
   const readOnly = isReadOnlySkill(skill.canonicalPath, tools.data ?? []);
-  const toolById = new Map<string, ToolDto>((tools.data ?? []).map((t) => [t.id, t]));
-  const myTargets = (targets.data ?? []).filter((t) => t.skillId === skill.id);
-  const deployedToolIds = new Set(myTargets.map((t) => t.toolId));
-  const deployableTools = (tools.data ?? []).filter((t) => t.enabled && t.installed);
+  const toolById = new Map<string, ToolDto>((tools.data ?? []).map((x) => [x.id, x]));
+  const myTargets = (targets.data ?? []).filter((x) => x.skillId === skill.id);
+  const deployedToolIds = new Set(myTargets.map((x) => x.toolId));
+  const deployableTools = (tools.data ?? []).filter((x) => x.enabled && x.installed);
 
   // ------------------------------------------------------------------
   // 更新：检查 → diff 摘要确认 → 应用
@@ -188,12 +177,9 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
       {
         onSuccess: (outcome: UpdateOutcome) => {
           if (outcome === "upToDate") {
-            toast.show("内容与磁盘一致，未做改动", "success");
+            toast.show(t("detail.updateUpToDateToast"), "success");
           } else if ("applied" in outcome) {
-            toast.show(
-              `已更新到 ${shortRevision(outcome.applied.revision)}（旧版已移入回收站）`,
-              "success",
-            );
+            toast.show(t("detail.updateAppliedToast", { rev: shortRevision(outcome.applied.revision) }), "success");
           } else if ("unsupported" in outcome) {
             toast.show(outcome.unsupported.reason, "danger");
           }
@@ -211,7 +197,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
     deployApply.mutate(
       { skillId: skill.id, tools: [toolId], mode: "symlink", overwrite: false, dryRun: false },
       {
-        onSuccess: () => toast.show(`已部署到 ${toolById.get(toolId)?.displayName ?? toolId}`, "success"),
+        onSuccess: () => toast.show(t("common.deployToast", { tool: toolById.get(toolId)?.displayName ?? toolId }), "success"),
         onError: (e) => toast.show(ipcError(e), "danger"),
       },
     );
@@ -221,7 +207,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
     deployRevoke.mutate(
       { skillId: skill.id, tools: [toolId], dryRun: false },
       {
-        onSuccess: () => toast.show(`已取消部署到 ${toolById.get(toolId)?.displayName ?? toolId}`, "success"),
+        onSuccess: () => toast.show(t("common.revokeToast", { tool: toolById.get(toolId)?.displayName ?? toolId }), "success"),
         onError: (e) => toast.show(ipcError(e), "danger"),
       },
     );
@@ -237,38 +223,23 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
     openPath.mutate(`skill:${skill.id}`, { onError: (e) => toast.show(ipcError(e), "danger") });
   }
 
+  /// 缩写 revision（+ 「未记录」i18n）。
+  function shortRevision(rev: string | null): string {
+    if (!rev) {
+      return t("detail.revisionNone");
+    }
+    return rev.length > 12 ? `${rev.slice(0, 12)}…` : rev;
+  }
+
   // ------------------------------------------------------------------
   // 渲染
   // ------------------------------------------------------------------
-  /// §9.3 底部问题列表：错误（阻断保存）在前、告警（不阻断）在后；
-  /// 空态文案区分"校验中 / 通过 / 无问题"。
-  function renderDocIssueList() {
-    if (validating && !report) {
-      return <p className="text-xs text-ink-faint">正在校验…</p>;
-    }
-    const errors = report?.errors ?? [];
-    const warnings = report?.warnings ?? [];
-    if (errors.length === 0 && warnings.length === 0) {
-      return <p className="text-xs text-success">校验通过：frontmatter 完整，未发现其他问题。</p>;
-    }
-    return (
-      <div className="space-y-1.5">
-        {errors.map((issue, i) => (
-          <DocIssueRow key={`e${i}`} issue={issue} tone="danger" />
-        ))}
-        {warnings.map((issue, i) => (
-          <DocIssueRow key={`w${i}`} issue={issue} tone="blue" />
-        ))}
-      </div>
-    );
-  }
-
   /// 安全体检（§9.1）：打开详情页即扫描（纯静态，只提示不阻断安装）。
   function renderSecurityCard() {
     return (
       <section className="sb-card p-4">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-ink">安全体检</h3>
+          <h3 className="text-sm font-semibold text-ink">{t("detail.securityTitle")}</h3>
           {security.isLoading ? (
             <Skeleton className="h-5 w-14 rounded-[6px]" />
           ) : (
@@ -283,7 +254,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
               ))}
             </div>
           ) : security.isError ? (
-            <p className="text-xs leading-5 text-danger">扫描失败：{ipcError(security.error)}</p>
+            <p className="text-xs leading-5 text-danger">{t("detail.securityFail", { msg: ipcError(security.error) })}</p>
           ) : (
             <FindingList findings={security.data?.findings ?? []} />
           )}
@@ -295,37 +266,35 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
   function renderUpdateCard() {
     return (
       <section className="sb-card p-4">
-        <h3 className="text-sm font-semibold text-ink">更新</h3>
+        <h3 className="text-sm font-semibold text-ink">{t("detail.updateTitle")}</h3>
         {skill.originKind === "archive" ? (
-          <p className="mt-2 text-xs leading-5 text-ink-secondary">
-            压缩包导入的 Skill 不支持在线更新；如需更新，请删除后重新导入新版档案。
-          </p>
+          <p className="mt-2 text-xs leading-5 text-ink-secondary">{t("detail.updateArchiveNoSupport")}</p>
         ) : (
           <>
             <div className="mt-2 flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={check.isPending}
-                onClick={runCheck}
-              >
+              <Button variant="secondary" size="sm" disabled={check.isPending} onClick={runCheck}>
                 <RefreshCw size={13} className={check.isPending ? "animate-spin" : ""} />
-                {skill.originKind === "git" ? "检查更新" : "检查本地变更"}
+                {t(skill.originKind === "git" ? "detail.updateCheckGit" : "detail.updateCheckLocal")}
               </Button>
             </div>
             {check.isPending && <Skeleton className="mt-3 h-12 w-full rounded-[8px]" />}
             {checkResult && (
               <div className="mt-3 space-y-2 border-t border-line pt-3">
                 {checkResult.status === "upToDate" && (
-                  <p className="text-xs leading-5 text-success">已是最新{checkResult.note ? `（${checkResult.note}）` : ""}</p>
+                  <p className="text-xs leading-5 text-success">
+                    {t("detail.updateUpToDate")}
+                    {checkResult.note ? t("detail.updateNoteSuffix", { note: checkResult.note }) : ""}
+                  </p>
                 )}
                 {checkResult.status === "unsupported" && (
-                  <p className="text-xs leading-5 text-ink-secondary">{checkResult.note ?? "该来源不支持更新。"}</p>
+                  <p className="text-xs leading-5 text-ink-secondary">
+                    {checkResult.note ?? t("detail.updateUnsupportedDefault")}
+                  </p>
                 )}
                 {checkResult.status === "updateAvailable" && (
                   <>
                     <p className="text-xs leading-5 text-ink">
-                      {skill.originKind === "git" ? "远端有新版本：" : "磁盘内容有变化："}
+                      {t(skill.originKind === "git" ? "detail.updateGitNew" : "detail.updateLocalNew")}
                       <span className="font-mono">{shortRevision(checkResult.currentRevision)}</span>
                       {" → "}
                       <span className="font-mono">{shortRevision(checkResult.newRevision)}</span>
@@ -336,7 +305,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
                       </pre>
                     )}
                     <Button variant="primary" size="sm" disabled={apply.isPending} onClick={() => setShowApplyConfirm(true)}>
-                      应用更新
+                      {t("detail.updateApply")}
                     </Button>
                   </>
                 )}
@@ -352,53 +321,48 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
     if (readOnly) {
       return (
         <section className="sb-card p-4">
-          <h3 className="text-sm font-semibold text-ink">部署状态</h3>
+          <h3 className="text-sm font-semibold text-ink">{t("detail.deployTitle")}</h3>
           <div className="mt-2 flex items-center gap-2">
-            <Badge tone="danger" dot>只读来源</Badge>
-            <p className="text-xs leading-5 text-ink-secondary">来自插件缓存（extra_scan_dirs），不允许部署。</p>
+            <Badge tone="danger" dot>{t("detail.deployReadOnlyBadge")}</Badge>
+            <p className="text-xs leading-5 text-ink-secondary">{t("detail.deployReadOnlyDesc")}</p>
           </div>
         </section>
       );
     }
     return (
       <section className="sb-card p-4">
-        <h3 className="text-sm font-semibold text-ink">部署状态</h3>
+        <h3 className="text-sm font-semibold text-ink">{t("detail.deployTitle")}</h3>
         {myTargets.length > 0 ? (
           <div className="mt-2 space-y-2">
-            {myTargets.map((t) => (
-              <div key={t.toolId} className="flex items-center gap-2 rounded-[8px] bg-surface px-2.5 py-2">
+            {myTargets.map((x) => (
+              <div key={x.toolId} className="flex items-center gap-2 rounded-[8px] bg-surface px-2.5 py-2">
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5 text-xs font-medium text-ink">
-                    {toolById.get(t.toolId)?.displayName ?? t.toolId}
-                    <Badge tone="blue">{MODE_LABEL[t.mode]}</Badge>
+                    {toolById.get(x.toolId)?.displayName ?? x.toolId}
+                    <Badge tone="blue">{t(MODE_LABEL_KEY[x.mode])}</Badge>
                   </span>
-                  <span className="mt-0.5 block truncate font-mono text-xs text-ink-faint" title={t.path}>
-                    {t.path}
+                  <span className="mt-0.5 block truncate font-mono text-xs text-ink-faint" title={x.path}>
+                    {x.path}
                   </span>
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={deployRevoke.isPending}
-                  onClick={() => revokeFrom(t.toolId)}
-                >
+                <Button variant="ghost" size="sm" disabled={deployRevoke.isPending} onClick={() => revokeFrom(x.toolId)}>
                   <Unlink size={13} />
-                  取消
+                  {t("common.cancel")}
                 </Button>
               </div>
             ))}
           </div>
         ) : (
-          <p className="mt-2 text-xs text-ink-faint">尚未部署到任何工具。</p>
+          <p className="mt-2 text-xs text-ink-faint">{t("detail.deployNone")}</p>
         )}
-        {deployableTools.filter((t) => !deployedToolIds.has(t.id)).length > 0 && (
+        {deployableTools.filter((x) => !deployedToolIds.has(x.id)).length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
-            <span className="text-xs text-ink-faint">部署到：</span>
+            <span className="text-xs text-ink-faint">{t("detail.deployTo")}</span>
             {deployableTools
-              .filter((t) => !deployedToolIds.has(t.id))
-              .map((t) => (
-                <Button key={t.id} size="sm" disabled={deployApply.isPending} onClick={() => deployTo(t.id)}>
-                  {(t.icon || t.displayName).slice(0, 2)} {t.displayName}
+              .filter((x) => !deployedToolIds.has(x.id))
+              .map((x) => (
+                <Button key={x.id} size="sm" disabled={deployApply.isPending} onClick={() => deployTo(x.id)}>
+                  {(x.icon || x.displayName).slice(0, 2)} {x.displayName}
                 </Button>
               ))}
           </div>
@@ -413,17 +377,17 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
       <div className="flex items-start gap-3">
         <Button variant="ghost" size="sm" onClick={() => requestDiscard(onBack)}>
           <ArrowLeft size={14} />
-          返回
+          {t("common.back")}
         </Button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <h2 className="truncate text-base font-semibold text-ink">{skill.name}</h2>
-            <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{ORIGIN_LABEL[skill.originKind]}</Badge>
+            <Badge tone={skill.originKind === "local" ? "neutral" : "blue"}>{t(ORIGIN_LABEL_KEY[skill.originKind])}</Badge>
             <RiskBadge level={security.data?.riskLevel} scanned={!!security.data} />
-            {readOnly && <Badge tone="danger" dot>只读来源</Badge>}
+            {readOnly && <Badge tone="danger" dot>{t("detail.deployReadOnlyBadge")}</Badge>}
           </div>
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-ink-secondary">
-            {skill.description || "（无描述）"}
+            {skill.description || t("common.noDescription")}
           </p>
         </div>
       </div>
@@ -433,31 +397,30 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
         <section className="sb-card flex min-h-0 flex-col overflow-hidden p-0">
           <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
             <h3 className="flex-1 text-sm font-semibold text-ink">
-              SKILL.md {editing ? "编辑" : "预览"}
+              SKILL.md {editing ? t("detail.docEdit") : t("detail.docPreview")}
             </h3>
             {editing ? (
               <>
                 <span className="text-xs text-ink-faint">
-                  {validating ? "校验中…" : hasErrors ? "存在错误，保存被阻止" : "错误会阻止保存；告警不会"}
+                  {validating
+                    ? t("detail.editHintValidating")
+                    : hasErrors
+                      ? t("detail.editHintErrors")
+                      : t("detail.editHintNormal")}
                 </span>
                 <Button size="sm" disabled={docSave.isPending} onClick={() => requestDiscard(exitEdit)}>
                   <X size={13} />
-                  取消
+                  {t("common.cancel")}
                 </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={docSave.isPending || hasErrors}
-                  onClick={saveDoc}
-                >
+                <Button variant="primary" size="sm" disabled={docSave.isPending || hasErrors} onClick={saveDoc}>
                   <Save size={13} />
-                  保存
+                  {t("common.save")}
                 </Button>
               </>
             ) : (
               <Button variant="secondary" size="sm" disabled={doc.isLoading || doc.isError} onClick={startEdit}>
                 <Pencil size={13} />
-                编辑
+                {t("common.edit")}
               </Button>
             )}
           </div>
@@ -473,7 +436,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
               </div>
               {/* 底部问题列表：错误（红，阻断保存）+ 告警（蓝，不阻断） */}
               <div className="max-h-40 shrink-0 overflow-y-auto border-t border-line px-4 py-2.5">
-                {renderDocIssueList()}
+                <DocIssueList validating={validating} report={report} />
               </div>
             </>
           ) : (
@@ -486,11 +449,11 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
                 </div>
               ) : doc.isError ? (
                 <EmptyState
-                  title="读取 SKILL.md 失败"
+                  title={t("detail.readDocFail")}
                   description={ipcError(doc.error)}
                   action={
                     <Button variant="primary" size="sm" onClick={() => void qc.invalidateQueries({ queryKey: queryKeys.skillDoc(skill.id) })}>
-                      重试
+                      {t("common.retry")}
                     </Button>
                   }
                 />
@@ -504,14 +467,14 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
         {/* 右列：溯源 · 更新 · 部署状态 */}
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-0.5">
           <section className="sb-card p-4">
-            <h3 className="text-sm font-semibold text-ink">来源溯源</h3>
+            <h3 className="text-sm font-semibold text-ink">{t("detail.originTitle")}</h3>
             <dl className="mt-2 space-y-2 text-xs leading-5">
               <div className="flex gap-2">
-                <dt className="w-14 shrink-0 text-ink-faint">类型</dt>
-                <dd className="min-w-0 text-ink">{ORIGIN_LABEL[skill.originKind]}</dd>
+                <dt className="w-14 shrink-0 text-ink-faint">{t("detail.originType")}</dt>
+                <dd className="min-w-0 text-ink">{t(ORIGIN_LABEL_KEY[skill.originKind])}</dd>
               </div>
               <div className="flex gap-2">
-                <dt className="w-14 shrink-0 text-ink-faint">{skill.originKind === "git" ? "仓库" : skill.originKind === "archive" ? "档案" : "路径"}</dt>
+                <dt className="w-14 shrink-0 text-ink-faint">{t(ORIGIN_REF_LABEL_KEY[skill.originKind])}</dt>
                 <dd className="min-w-0 flex-1">
                   <span className="block truncate font-mono text-ink" title={skill.originRef ?? skill.canonicalPath}>
                     {skill.originRef ?? skill.canonicalPath}
@@ -520,7 +483,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
               </div>
               {skill.originKind === "git" && skill.originSubpath && (
                 <div className="flex gap-2">
-                  <dt className="w-14 shrink-0 text-ink-faint">子路径</dt>
+                  <dt className="w-14 shrink-0 text-ink-faint">{t("detail.originSubpath")}</dt>
                   <dd className="min-w-0 truncate font-mono text-ink" title={skill.originSubpath}>
                     {skill.originSubpath}
                   </dd>
@@ -528,7 +491,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
               )}
               {skill.originKind === "git" && (
                 <div className="flex gap-2">
-                  <dt className="w-14 shrink-0 text-ink-faint">版本</dt>
+                  <dt className="w-14 shrink-0 text-ink-faint">{t("detail.originRevision")}</dt>
                   <dd className="min-w-0 truncate font-mono text-ink" title={skill.originRevision ?? undefined}>
                     {shortRevision(skill.originRevision)}
                   </dd>
@@ -539,12 +502,12 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
               {skill.originKind === "git" && skill.originRef && (
                 <Button variant="secondary" size="sm" disabled={openPath.isPending} onClick={openSourceUrl}>
                   <ExternalLink size={13} />
-                  打开仓库
+                  {t("detail.openRepo")}
                 </Button>
               )}
               <Button variant="secondary" size="sm" disabled={openPath.isPending} onClick={openCanonicalDir}>
                 <FolderOpen size={13} />
-                打开目录
+                {t("detail.openDir")}
               </Button>
             </div>
           </section>
@@ -559,19 +522,19 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
       <Modal
         open={showApplyConfirm}
         onClose={() => setShowApplyConfirm(false)}
-        title="应用更新"
+        title={t("detail.applyConfirmTitle")}
         footer={
           <>
-            <Button onClick={() => setShowApplyConfirm(false)}>再想想</Button>
+            <Button onClick={() => setShowApplyConfirm(false)}>{t("common.holdOn")}</Button>
             <Button variant="primary" disabled={apply.isPending} onClick={runApply}>
-              确认更新
+              {t("detail.applyConfirmOk")}
             </Button>
           </>
         }
       >
         <p>
-          将用新内容替换「{skill.name}」的正本；旧版本会移入回收站，不会直接抹除。
-          {checkResult?.diffSummary ? " 上方已展示更新前 diff 摘要。" : ""}
+          {t("detail.applyConfirmBody", { skill: skill.name })}
+          {checkResult?.diffSummary ? t("detail.applyConfirmDiffNote") : ""}
         </p>
       </Modal>
 
@@ -579,10 +542,10 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
       <Modal
         open={discardAction !== null}
         onClose={() => setDiscardAction(null)}
-        title="放弃未保存的修改？"
+        title={t("detail.discardTitle")}
         footer={
           <>
-            <Button onClick={() => setDiscardAction(null)}>继续编辑</Button>
+            <Button onClick={() => setDiscardAction(null)}>{t("detail.discardKeep")}</Button>
             <Button
               variant="danger"
               onClick={() => {
@@ -590,28 +553,13 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
                 setDiscardAction(null);
               }}
             >
-              放弃修改
+              {t("detail.discardOk")}
             </Button>
           </>
         }
       >
-        <p>编辑器中还有未保存的改动，放弃后将无法找回（保存前的自动备份只在保存时生成）。</p>
+        <p>{t("detail.discardBody")}</p>
       </Modal>
-    </div>
-  );
-}
-
-/// 底部问题列表单行：行号 + 规则人话标签 + 后端原文说明。
-function DocIssueRow({ issue, tone }: { issue: DocIssue; tone: "danger" | "blue" }) {
-  return (
-    <div className="flex items-start gap-2 rounded-[8px] bg-surface px-2.5 py-1.5">
-      <Badge tone={tone} dot>
-        {DOC_RULE_LABEL[issue.rule] ?? issue.rule}
-      </Badge>
-      <p className="min-w-0 flex-1 text-xs leading-5 text-ink-secondary">
-        {issue.line > 0 && <span className="mr-1.5 font-mono text-ink-faint">第 {issue.line} 行</span>}
-        {issue.message}
-      </p>
     </div>
   );
 }

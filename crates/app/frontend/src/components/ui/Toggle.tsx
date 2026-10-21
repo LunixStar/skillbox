@@ -1,3 +1,5 @@
+import { useI18n } from "../../i18n";
+
 interface ToggleProps {
   checked: boolean;
   onChange: (next: boolean) => void;
@@ -6,13 +8,14 @@ interface ToggleProps {
 }
 
 export default function Toggle({ checked, onChange, disabled = false, label }: ToggleProps) {
+  const { t } = useI18n();
   return (
     <label className={`inline-flex items-center gap-2 ${disabled ? "opacity-40" : "cursor-pointer"}`}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label={label ?? "开关"}
+        aria-label={label ?? t("common.toggleSwitch")}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`relative h-5 w-9 shrink-0 rounded-full ${checked ? "bg-primary" : "bg-line"}`}

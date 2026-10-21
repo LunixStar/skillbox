@@ -1,5 +1,37 @@
 # SkillBox 开发进度
 
+## Step 13 i18n（Phase 5）：自研 t() + zh-CN/en 双语 + 语言切换 + 设置页实装
+
+状态：完成
+
+做了：
+- **i18n 核心**（禁 i18next，§0.4）：`src/i18n/index.tsx`（新）——`I18nProvider`（挂载时经 settings_get 读 `language` 键；`setLang` 时 settings_set 持久化 + 同步 `document.documentElement.lang`）、`useI18n()` → `{ lang, setLang, t }`、`t(key, params?)` 扁平点分 key + `{x}` 插值，回退链 当前语言 → zh-CN → key 本身。`main.tsx` 接线：QueryClientProvider 内、ToastProvider 外。
+- **词表**：`src/i18n/zh-CN.json` + `en.json` —— 各 **281** 个扁平 key（common/sidebar/overview/tools/library/detail/security/doctor/toolbox/firstrun/settings 前缀分组），两份 key 集合一致。
+- **比对脚本**：`scripts/check-i18n.mjs`（新）——双向 key 集合比对（missing-en/missing-zh 为 error）、源码 `t("...")` 字面量扫描（undefined-key 为 error）、unused-key 告警；`package.json` += `check:i18n`。
+- **全量文案替换**（14 个文件）：Sidebar（NavItem.labelKey）、OverviewPage、ToolsPage（GROUP_LABEL_KEY/FORM_SHORT_KEY Record 重构）、SecurityKit（RiskBadge/FindingList 组件内 useI18n + RULE_LABEL_KEY 映射，未知 ruleId 回退 id）、FirstRun（全部五步）、DoctorPage（SEVERITY_LABEL_KEY/KIND_TITLE_KEY/IssueAction.labelKey 重构，locale 按 lang 取 zh-CN/en-US）、ToolboxPage、LibraryPage（搜索/过滤/角标/两级删除确认/重扫弹窗全套接 t）、SkillDetailPage（编辑/校验/更新/部署/溯源/确认弹窗）、ui 基础组件 Drawer/Tag/Toggle（三处硬编码 aria-label 一并接 t）。
+- **拆分（600 行上限）**：SkillDetailPage **617 → 555**（底部问题列表拆出 `components/DocIssueList.tsx`，DOC_RULE_LABEL_KEY 映射随迁）；LibraryPage **631 → 590**（扫描对话框拆出 `components/ScanModals.tsx`：ScanResultModal / ScanRunningModal / TagFilterModal）。
+- **设置页实装**：新建 `pages/SettingsPage.tsx`（语言分段切换 简体中文/English + 中央库说明 + 打开按钮）；MainShell 去 PLACEHOLDERS 占位；删除 `pages/PlaceholderPage.tsx`。
+
+没做：
+- dev 页（DesignSystemPage / IPCTester）不 i18n —— 内部开发者工具，在此备案。
+- 语言选项名「简体中文」/「English」按惯例各自原文显示，不互译。
+- 代码注释保持中文（工程约定，非 UI 文案，不在 DoD「无漏翻」范围）。
+
+自检输出（真实结果）：
+1. `npm run check:i18n` → `zh=281 en=281 used=214 failures=0`
+2. `npm run build`（tsc --noEmit + vite）→ 通过（built in 2.88s，2062 modules）
+3. `cargo clippy --workspace --all-targets -- -D warnings` → Finished in 0.79s，零警告
+4. `cargo test --workspace` → 205 passed / 0 failed（adapters 23、domain 6、engine 154、ports 9、store 13）
+5. 全部 .rs ≤ 600 行（58 文件，0 超限）；全部前端 tsx/ts ≤ 600 行（0 超限）
+6. 核心五 crate `tauri::` grep → 0；IPC 命令 32 个（crates\ipc）= §8 上限
+7. touch main.rs + `cargo build --release` → **7.60 MB ≤ 12 MB**（42.79s）
+8. release exe 启动存活验证 → ALIVE（pid=4212，5 秒）后正常关闭
+
+遗留风险 / 备案：
+- 语言持久化复用 settings 表 `language` 键（settings_get/set 既有 IPC，**零新增命令**）；读取失败回退 zh-CN；持久化失败不阻断会话内切换。
+- check-i18n 的 unused-key 告警共 62 条，均为 Record 映射 / 三元引用经非字面量路径触达的假阳性（脚本只扫 `t("字面量")`）；已人工核对无真实漏用。
+- verify_ui 不可用（仅支持 HarmonyOS 工程，本项目为 Tauri 桌面应用）；语言切换经 build + 启动冒烟验证。
+
 ## Step 12 SKILL.md 编辑器（§9.3）：CodeMirror 6 + 元数据校验 + .bak + 增量重扫
 
 状态：完成

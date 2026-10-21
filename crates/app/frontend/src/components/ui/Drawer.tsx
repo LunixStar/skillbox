@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useI18n } from "../../i18n";
 
 interface DrawerProps {
   open: boolean;
@@ -8,6 +9,7 @@ interface DrawerProps {
 }
 
 export default function Drawer({ open, onClose, title, children }: DrawerProps) {
+  const { t } = useI18n();
   const [mounted, setMounted] = useState(open);
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export default function Drawer({ open, onClose, title, children }: DrawerProps) 
               type="button"
               className="rounded-btn px-1.5 text-ink-faint hover:bg-surface hover:text-ink"
               onClick={onClose}
-              aria-label="关闭抽屉"
+              aria-label={t("common.closeDrawer")}
             >
               ×
             </button>
