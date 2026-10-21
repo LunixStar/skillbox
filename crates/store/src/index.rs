@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OptionalExtension};
+use serde::Serialize;
 use skillbox_domain::{AppError, AppResult, OriginKind, SkillId, SyncMode, ToolId};
 use skillbox_ports::{IndexStore, OriginInfo};
 
@@ -126,7 +127,8 @@ impl IndexStore for DbIndexStore {
 }
 
 /// `skill_targets` 单行（读侧投影；engine 的 `TargetRecord` 组装原料）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TargetRow {
     pub skill_id: SkillId,
     pub tool_id: ToolId,

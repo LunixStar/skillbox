@@ -104,34 +104,41 @@ struct Results {
     warnings: Vec<String>,
 }
 
-/// 一次扫描的共享上下文。
-struct ScanCtx<'a> {
-    fs: &'a Arc<dyn FileSystem>,
-    clock: &'a Arc<dyn Clock>,
-    cache: Option<&'a Arc<Mutex<dyn ScanCache>>>,
-    cancel: &'a CancellationToken,
-    on_progress: &'a (dyn Fn(ScanProgress) + Sync),
-    blacklist: Vec<String>,
-    max_depth: u8,
-    incremental: bool,
-    pool: Pool,
-    results: Mutex<Results>,
-    scanned: AtomicU32,
-}
-
-impl<'a> ScanCtx<'a> {
-    /// §7 约束 9：目录计数，每 50 个 emit 一次进度。
-    /// `scanned` 单调递增，多线程交错下恰好每个 50 倍数 emit 一次。
-    fn note_scanned(&self, current: &Path) {
-        let n = self.scanned.fetch_add(1, Ordering::Relaxed) + 1;
-        if n.is_multiple_of(PROGRESS_EVERY) {
-            (self.on_progress)(ScanProgress {
-                scanned: n,
-                total_hint: None,
-                current: current.to_path_buf(),
-            });
-        }
+    /// 一次扫描的共享上下文。
+    struct ScanCtx<'a> {
+        fs: &'a Arc<dyn FileSystem>,
+        clock: &'a Arc<dyn Clock>,
+        cache: Option<&'a Arc<Mutex<dyn ScanCache>>>,
+        cancel: &'a CancellationToken,
+        on_progress: &'a (dyn Fn(ScanProgress) + Sync),
+        blacklist: Vec<String>,
+        max_depth: u8,
+        incremental: bool,
+        pool: Pool,
+        results: Mutex<Results>,
+        scanned: AtomicU32,
+        /// 已确认 skill 目录总数（进度快照用）。
+        found: AtomicU32,
+        /// 按工具 id 累计的发现数（进度快照用）。
+        found_by_tool: Mutex<std::collections::BTreeMap<String, u32>>,
     }
+
+    impl<'a> ScanCtx<'a> {
+        /// §7 约束 9：目录计数，每 50 个 emit 一次进度。
+        /// `scanned` 单调递增，多线程交错下恰好每个 50 倍数 emit 一次。
+        fn note_scanned(&self, job: &ScanJob) {
+            let n = self.scanned.fetch_add(1, Ordering::Relaxed) + 1;
+            if n.is_multiple_of(PROGRESS_EVERY) {
+                (self.on_progress)(ScanProgress {
+                    scanned: n,
+                    total_hint: None,
+                    current: job.path.clone(),
+                    found: self.found.load(Ordering::Relaxed),
+                    current_tool: job.tool_id.clone(),
+                    found_by_tool: self.found_by_tool.lock().expect("scan found_by_tool poisoned").clone(),
+                });
+            }
+        }
 
     fn push_job(&self, job: ScanJob) {
         let mut st = self.pool.state.lock().expect("scan pool poisoned");
@@ -199,7 +206,7 @@ impl<'a> ScanCtx<'a> {
         if self.cancel.is_cancelled() {
             return;
         }
-        self.note_scanned(&job.path);
+        self.note_scanned(&job);
 
         // §7 约束 5：仅对扫描根做卷检查（逐目录 syscall 代价过高；根之下
         // 的遍历不跨卷——符号链接不会入队）。
@@ -295,6 +302,16 @@ impl<'a> ScanCtx<'a> {
             .expect("scan results poisoned")
             .skills
             .push(skill);
+        // 实时发现计数（进度快照数据源；中央库根不带工具 id，不计入分工具表）。
+        self.found.fetch_add(1, Ordering::Relaxed);
+        if let Some(tool) = &job.tool_id {
+            *self
+                .found_by_tool
+                .lock()
+                .expect("scan found_by_tool poisoned")
+                .entry(tool.0.clone())
+                .or_insert(0) += 1;
+        }
     }
 
     /// §7 约束 6 前半：指纹一致时复用缓存的 name / description，
@@ -460,6 +477,8 @@ pub fn scan(
         pool: Pool { state: Mutex::new(PoolState::default()), idle: Condvar::new() },
         results: Mutex::new(Results::default()),
         scanned: AtomicU32::new(0),
+        found: AtomicU32::new(0),
+        found_by_tool: Mutex::new(std::collections::BTreeMap::new()),
     };
 
     // 播种根任务（depth 0，不受黑名单 / 深度约束）。

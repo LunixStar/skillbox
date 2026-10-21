@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 rusqlite = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 skillbox-domain = { workspace = true }
 skillbox-ports = { workspace = true }

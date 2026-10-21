@@ -11,11 +11,11 @@
 //! - `system_open_path` 只接受后端生成的路径 id（防路径穿越）。
 //! - ipc 不直接调 adapters 拼路径，环境解析一律走 engine（§2.1）。
 //!
-//! 命令面（§8，共 31 个 ≤ 32 上限）：
+//! 命令面（§8，共 32 个 = 上限）：
 //! ```text
 //! scan    : start / cancel / status                    (3)
-//! library : list / get / install_local / install_git / remove
-//!           / doc_read / doc_write / doc_validate      (8)
+//! library : list / targets / get / install_local / install_git / remove
+//!           / doc_read / doc_write / doc_validate      (9)
 //! deploy  : apply / revoke / set_mode                  (3)
 //! tools   : list / set_enabled                         (2)
 //! doctor  : run / fix                                  (2)
@@ -54,8 +54,9 @@ pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder
         scan::scan_start,
         scan::scan_cancel,
         scan::scan_status,
-        // library（8）
+        // library（9）
         library::library_list,
+        library::library_targets,
         library::library_get,
         library::library_install_local,
         library::library_install_git,

@@ -1,5 +1,48 @@
 # SkillBox 开发进度
 
+## Step 8 主流程 UI：首启向导 + 技能库/工具页 + TanStack Query
+
+状态：完成
+
+做了：
+- **后端小幅扩展**（为 UI 提供数据，不新增能力面）：
+  - `ScanProgress` 扩展（engine/types.rs）：新增 `found`（已确认 skill 总数）、`currentTool`、`foundByTool`（按工具累计发现数，中央库命中不计入）；ScanCtx 增 `found: AtomicU32` + `found_by_tool: Mutex<BTreeMap>`，`record_skill` 登记 + 计数，`note_scanned(&ScanJob)` 快照进进度事件 → 首启向导"发现 Claude Code ×12…"实时数据源。
+  - 第 32 个（= 上限）IPC 命令 `library_targets`：返回 `Vec<TargetRow>`（skill→tool 部署意图全集），`TargetRow` 补 `Serialize(camelCase)`（store 增 serde 依赖）；技能卡 agent 角标"已部署"状态数据源。
+- **前端数据层**（新增依赖均在 §1 白名单）：
+  - `@tanstack/react-query` + `lucide-react` 落地；`api/ipc.ts`（32 命令中 UI 用到的 18 个的类型化封装 + `scan://progress|done|error` 事件订阅 + `ipcError` 错误规范化）；`api/queries.ts`（查询键 + hooks；**所有 mutation 成功后失效 library/targets/tools 相关查询**，零 useState+useEffect 手动刷新；首启开关 `first_run.done` 走 settings_get/set，staleTime Infinity）。
+- **首启向导**（`first-run/FirstRun.tsx`，§10 五步）：
+  - 欢迎（两句话说明 + 明示"不移动/不删除任何文件"）→ 扫描（事件流实时：已扫描 N 目录 · 已发现 M 个 · "发现 Claude Code ×12"人类语言行，轮询 scan_status 兜底事件丢失窗口，可取消）→ 选择（按工具分组、逐项勾选默认全选、只读目录标"只读"；**默认原地登记**（keepInPlace=true 零写盘）；「统一到中央库」可选 checkbox 默认关，勾选后明示"原文件先移入回收站可恢复"）→ 执行（逐项串行，进度条 + 逐条结果流，单项失败不中断）→ 完成（成功/失败统计，失败原因列出）→ 写 `first_run.done` 进主框架。
+  - 统一策略：install_local(keepInPlace=false) 复制入中央 → deploy_apply(overwrite=true) 以链接替换原目录（engine 部署纪律自动把原目录移入 trash = 快照/可恢复）；read_only 与无 tool_id 目录退化为原地登记。
+- **主框架**（`shell/`）：Sidebar（§11.3 IA：概览/技能库/工具/体检/工具箱/设置 + 底部开发者入口与"打开中央库"；选中项 3px 蓝左条 + primary-soft 底）+ MainShell（useState 视图切换，桌面应用不引入路由）。
+- **技能库页**（`pages/LibraryPage.tsx`，§11.3）：
+  - 顶栏：搜索（名称/描述/来源）· 来源过滤（全部/本地/Git/压缩包）· 标签（弹层诚实空态——v1 skill_tags 无写入来源）· 网格/列表视图切换 · 扫描按钮。
+  - 卡片：名称 · 描述（2 行截断）· 来源徽章 · 风险徽章（诚实占位"未体检"，Phase 4 实装）· **agent 角标常驻可见**（所有已启用+已安装工具；已部署=蓝底白字，点击弹一级确认「取消部署」；未部署=描边灰，点击即 deploy_apply；无右键菜单）。
+  - **两级删除语义**：一级「取消部署」（单工具或全部，确认框明示"正本仍在中央库"）= deploy_revoke；二级「删除 Skill」独立按钮 + 确认框明示"撤销 N 个部署 + 正本移入回收站可恢复" = library_remove(mode="delete")。**无任何直接删文件的不合格"删除"按钮**。
+  - 重新扫描：信息性（不自动入库）——扫描中弹层进度，完成后弹结果："发现 N 个 Skill 目录，其中 M 个已入库"，未入库目录逐行「登记」按钮（原地登记，不移动文件）。
+  - 列表 >300 行走自建 `VirtualList`（~60 行，absolute 定位 + 可见窗口渲染，零第三方库）；加载骨架屏 / 错误重试 / 空态齐备；mutation 错误走自建 `Toast`（右下角堆叠，~90 行）。
+- **工具页**（`pages/ToolsPage.tsx`）：按 form_factor 5 组分组（命令行/IDE/编辑器插件/终端 TUI/桌面助手）；每工具：图标 + 显示名 + 已安装徽章 + deployDir（等宽截断）+ 「目录」按钮（system_open_path `tool:<id>`）+ 启用 Toggle（tools_set_enabled 实时失效）。
+- **概览页**：技能总数/已部署目标/已启用工具三统计卡（TanStack 派生）+ 快捷操作；**体检/工具箱/设置三页为诚实占位**（EmptyState + Phase 4 说明，不造假数据）；main.tsx 挂 QueryClientProvider + ToastProvider；App.tsx 按 `first_run.done` 分流向导/主框架（加载期骨架屏）。
+
+没做：
+- 体检/工具箱/设置实装、标签编辑、skill 详情/文档编辑器（Phase 4，占位诚实）。
+- react-router-dom 未引入（桌面单窗视图切换 useState 足够，白名单依赖按需原则）。
+
+自检输出（真实结果）：
+1. `npm run build`（tsc --noEmit + vite）→ 通过（首跑 5 处 `ipcError` 未导出 TS2305，补导出后通过）
+2. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished dev profile in 1.37s`，EXIT=0，零警告
+3. `cargo test --workspace` → EXIT=0；166 passed / 0 failed（adapters 23、domain 6、engine 117、ports 8、store 12）
+4. 核心五 crate `tauri::` grep → 0；前端运行时依赖 = react / react-dom / @tauri-apps/api / @tanstack/react-query / lucide-react（全部 §1 白名单内；无动画库/图表库）
+5. 全部 .rs ≤ 600 行（未改大文件；fix.rs 546 最大；scan.rs 407 + types.rs 小幅扩展）
+6. IPC 命令 32 个 = §8 上限（新增 library_targets 占满，无超）
+7. `cargo build --release -p skillbox-app`（touch main.rs 强制嵌入新 dist）→ **7.47 MB ≤ 12 MB**
+8. release exe 启动存活验证 → ALIVE pid=28980（7 秒）后正常关闭
+
+遗留风险 / 备案：
+- 扫描事件经 Tauri event，StrictMode 双订阅/重放窗口可能丢事件 → 已用 1.2s 轮询 `scan_status` 兜底终态（向导与库页重扫均带）。
+- 统一到中央库时若 frontmatter name 与原目录名不一致，deploy_apply 会部署到 `deployDir/<name>` 新路径而非替换原目录（原目录保持不动，产生中央正本 + 原目录并存）；v1 接受此行为（不移动未知文件优先于完全统一）。
+- 重新扫描为信息性：不自动登记、不自动部署（防惊喜写盘）；登记需用户逐项点击。
+- skill_tags v1 无写入来源：标签过滤入口保留但为诚实空态；风险徽章同理为"未体检"占位。
+
 ## Step 7 设计系统：§11.1/§11.2 视觉基础（纯前端，mock）
 
 状态：完成

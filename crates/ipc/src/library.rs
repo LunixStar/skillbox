@@ -9,6 +9,7 @@ use skillbox_engine::{
     doc_read, doc_write, install, remove_skill, validate_meta, DocCheckReport, DocWriteOutcome,
     InstallOutcome, InstallRequest, InstallSource, RemoveMode, RemoveSkillOutcome,
 };
+use skillbox_store::TargetRow;
 use tauri::State;
 
 use crate::state::AppState;
@@ -16,6 +17,12 @@ use crate::state::AppState;
 #[tauri::command]
 pub fn library_list(state: State<'_, AppState>) -> AppResult<Vec<SkillMeta>> {
     state.store.list_skills()
+}
+
+/// 全部部署意图记录（skill → agent 角标"已部署"状态的数据源）。
+#[tauri::command]
+pub fn library_targets(state: State<'_, AppState>) -> AppResult<Vec<TargetRow>> {
+    state.store.list_targets()
 }
 
 #[tauri::command]

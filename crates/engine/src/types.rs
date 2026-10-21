@@ -2,6 +2,7 @@
 //!
 //! 这些类型同时是 IPC 序列化契约：全部 `#[serde(rename_all = "camelCase")]`（§8）。
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -141,6 +142,13 @@ pub struct ScanProgress {
     pub total_hint: Option<u32>,
     /// 当前正在处理的目录。
     pub current: PathBuf,
+    /// 目前已确认的 skill 目录总数（首启向导"已发现 N 个"的实时数据源）。
+    pub found: u32,
+    /// 当前正在处理的目录所属工具；中央库 / 未知来源为 None。
+    pub current_tool: Option<ToolId>,
+    /// 按工具 id 累计的已发现 skill 数（"发现 Claude Code ×12…"实时数据源）。
+    /// 中央库命中不计入（只反映 agent 目录）。
+    pub found_by_tool: BTreeMap<String, u32>,
 }
 
 /// 目录被跳过的原因（透明记录，供 UI 回答"为什么没扫到"）。
