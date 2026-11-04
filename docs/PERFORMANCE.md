@@ -7,12 +7,12 @@
 
 | 指标 | 预算 | 实测 | 结论 | 口径 |
 | --- | --- | --- | --- | --- |
-| 冷启动（主窗口出现） | ≤ 1.5 s | 首启 **1181 ms**（WebView2 冷）；后续 **216 / 254 ms** | 通过 | 见「冷启动与空闲 RSS」 |
-| 空闲 RSS | ≤ 150 MB | **26.8 – 30 MB** | 通过 | 同上 |
+| 冷启动（主窗口出现） | ≤ 1.5 s | **228 / 139 / 134 ms**（生产模式 exe） | 通过 | 见「冷启动与空闲 RSS」 |
+| 空闲 RSS | ≤ 150 MB | **28.9 MB** | 通过 | 同上 |
 | 扫描 5000 目录 | ≤ 60 s | 冷 **124 ms** / 暖 **99 ms** | 通过（480 倍余量） | `scan_bench`，FakeFs 内存树 |
 | 扫描 5000 目录 RSS 增量 | ≤ 80 MB | **1544 KB** | 通过 | 同上 |
 | IPC list 500 条往返 | ≤ 50 ms | 命令体+序列化 **min 0.49 ms / avg 1.15 ms** | 通过 | 见「IPC list 500 实测」；invoke 信封未计 |
-| release 体积 | ≤ 12 MB | **7.60 MB**（skillbox-app.exe） | 通过 | `cargo build --release` |
+| release 体积 | ≤ 12 MB | **7.90 MB**（skillbox-app.exe，含内嵌前端资源） | 通过 | `cargo build --release --features custom-protocol` |
 | 安装包（不含 WebView） | ≤ 20 MB | **N/A**（NSIS 未构建，无 bundle 产物） | 未测 | tauri.conf.json targets ["nsis"]；NSIS 工具链未构建过 |
 
 ## 测量环境
@@ -31,16 +31,19 @@
 
 ## 冷启动与空闲 RSS
 
-实测方式：PowerShell `Start-Process` 启动 `target\release\skillbox-app.exe`，
-`Stopwatch` 计时至 `MainWindowHandle != 0`（主窗口出现），静置 3 s 后采样 `WorkingSet64`。
+实测方式：PowerShell `Start-Process` 启动 `target\release\skillbox-app.exe`
+（生产模式构建：`--features custom-protocol`，WebView 加载内嵌资源 `http://tauri.localhost/`，
+不依赖 dev server），`Stopwatch` 计时至 `MainWindowHandle != 0`（主窗口出现），
+静置 2 s 后采样 `WorkingSet64`。
 
 | 轮次 | 冷启动 | 空闲 RSS |
 | --- | ---: | ---: |
-| 1（WebView2 冷启动） | 1181 ms | 30.0 MB |
-| 2 | 216 ms | 26.8 MB |
-| 3 | 254 ms | 27.0 MB |
+| 1 | 228 ms | 28.9 MB |
+| 2 | 139 ms | 28.9 MB |
+| 3 | 134 ms | 28.9 MB |
 
-- 首轮含 WebView2 运行时冷初始化；预算以最差轮（1181 ms）判定仍通过。
+- WebView2 运行时本机已暖（此前多轮启动）；最差轮 228 ms，预算 1.5 s 余量约 6 倍。
+- 页面实际加载 URL 经 CDP 调试端口核验为 `http://tauri.localhost/`（title=SkillBox）。
 
 ## 扫描基准（FakeFs 内存树 + MemoryScanCache）
 
@@ -97,5 +100,5 @@
 cargo bench -p skillbox-engine --bench scan_bench      # RSS 增量 / 冷暖扫描
 cargo bench -p skillbox-store --bench db_cache_bench   # DbCache vs MemCache 同进程对比
 cargo bench -p skillbox-store --bench list_bench       # IPC list 500 命令体 + 序列化
-cargo build --release -p skillbox-app                  # release 体积
+cargo build --release -p skillbox-app --features custom-protocol  # 生产 release 体积
 ```

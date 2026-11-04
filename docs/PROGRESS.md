@@ -1,5 +1,30 @@
 # SkillBox 开发进度
 
+## 构建修正（2026-10-21）：release exe 双击显示「无法连接」页 — custom-protocol 特性缺失
+
+状态：完成
+
+现象与根因：
+- 双击 `target\release\skillbox-app.exe` 显示 WebView2（Edge 内核）「无法连接」错误页。
+- 根因：此前所有 release 构建均为裸 `cargo build --release`，未启用 Tauri 的 `custom-protocol` 特性
+  （tauri 2.12.4 `is_dev() = !cfg!(feature = "custom-protocol")`）→ WebView 运行时加载
+  `devUrl`（http://localhost:5173）而非内嵌资源；无 vite dev server 时即报「无法连接」。
+- 此前各步的「release exe 启动存活 ALIVE」验证只确认进程存活，未验证页面内容，故一直未暴露。
+
+修复：
+- `crates/app/Cargo.toml` 新增 `[features] custom-protocol = ["tauri/custom-protocol"]`（官方模板要求的特性，tauri CLI 构建时自动带上，裸 cargo 需手动）。
+- 生产构建命令修正为：`cargo build --release -p skillbox-app --features custom-protocol`。
+
+验证（真实结果）：
+- 新 exe **7.90MB**（+0.30MB 内嵌前端资源，≤12MB 预算）。
+- CDP 调试端口核验：WebView 实际加载 **`http://tauri.localhost/`（title=SkillBox）**，不再依赖 5173。
+- 冷启动三轮 228/139/134ms（≤1.5s），空闲 RSS 28.9MB（≤150MB）。
+- PERFORMANCE.md 冷启动/RSS/体积数字已按生产模式 exe 复测更新（旧 1181/216/254ms 与 7.60MB 系 dev 模式 exe 所测，被本次取代）。
+
+开发/测试入口（备忘）：
+- **生产模式测试**：`cargo build --release -p skillbox-app --features custom-protocol` 后直接双击 exe，无需任何 server。
+- **开发热重载**：终端 1 `cd crates/app/frontend && npm run dev`（vite:5173）；终端 2 `cargo run -p skillbox-app`（debug 构建，加载 devUrl，带 HMR）。
+
 ## Step 13 收尾（Phase 5 Final）：动画收尾 + 命令面板 Ctrl+K + dev 路由守卫 + §7.1 性能实测 + 交付文档
 
 状态：完成
@@ -19,8 +44,8 @@
   - 新增 `crates/store/benches/list_bench.rs`：500 skill 灌库 + 20 轮 list_skills/serde 计时——**list 500 条命令体+序列化 min 0.49ms / avg 1.15ms**（预算 ≤50ms；invoke 信封未计，口径备案）。
   - 重跑 scan_bench：5000 目录冷 124ms / 暖 99ms，RSS 增量 1544KB（预算 ≤60s / ≤80MB）。
   - 重跑 db_cache_bench：5000 目录 DbCache 冷 163ms / 暖 105ms；20000 目录冷 1299ms。
-  - PowerShell 实测 release exe：冷启动（主窗口出现）首启 **1181ms** / 后续 216-254ms（预算 ≤1.5s）；空闲 RSS **26.8-30MB**（预算 ≤150MB）。
-  - release 体积 **7.60MB ≤ 12MB**；安装包 N/A（NSIS bundle 从未构建，如实记录）。
+  - PowerShell 实测 release exe：冷启动（主窗口出现）首启 **1181ms** / 后续 216-254ms（预算 ≤1.5s）；空闲 RSS **26.8-30MB**（预算 ≤150MB）。（注：当时 exe 为 dev 模式构建，数字已被顶部「构建修正」生产模式复测取代）
+  - release 体积 **7.60MB ≤ 12MB**；安装包 N/A（NSIS bundle 从未构建，如实记录）。（注：同上，生产模式为 7.90MB）
 - **交付文档**：
   - `docs/adapters.md`（新）：19 工具全表（路径依据 / 全局-项目级对称性 / 平台差异 / extra_scan 只读目录 / 待复核清单）+ 解析规则 + 形态分组 + 链接能力回退链。
   - `docs/security-rules.md`（新）：八条规则逐条匹配模式 + 严重度 + 误报说明 + 扫描上限 + risk level 汇总；「纯静态零执行」硬约束的结构性保证说明。
@@ -54,7 +79,7 @@
 
 未做事项（v2 候选，非 v1 承诺范围）：
 1. NSIS 安装包构建与体积实测（tauri.conf.json targets 已配 ["nsis"]，工具链未构建过）。
-2. 回收站恢复 UI、缓存管理 UI、日志导出 UI（IPC 均已有：trash_restore/cache_clear/system_logs_export）。
+2. 回收站恢复 UI、缓存管理 UI（IPC 已有：trash_restore/cache_clear）；日志导出（system_logs_export 仍为「尚未实现」占位命令，Phase 4 未实装）。
 3. 标签编辑（skill_tags 表无写入来源，标签过滤入口保留诚实空态）。
 4. 更新/体检的定时自动检查（v1 全手动触发，防后台惊喜）。
 5. WatchMute 真实文件监听（端口已预留）。
@@ -321,7 +346,7 @@
 - 扫描事件经 Tauri event，StrictMode 双订阅/重放窗口可能丢事件 → 已用 1.2s 轮询 `scan_status` 兜底终态（向导与库页重扫均带）。
 - 统一到中央库时若 frontmatter name 与原目录名不一致，deploy_apply 会部署到 `deployDir/<name>` 新路径而非替换原目录（原目录保持不动，产生中央正本 + 原目录并存）；v1 接受此行为（不移动未知文件优先于完全统一）。
 - 重新扫描为信息性：不自动登记、不自动部署（防惊喜写盘）；登记需用户逐项点击。
-- skill_tags v1 无写入来源：标签过滤入口保留但为诚实空态；风险徽章同理为"未体检"占位。
+- skill_tags v1 无写入来源：标签过滤入口保留但为诚实空态。
 
 ### 新手视角自测描述（首次运行，模拟机：3 个 agent 目录）
 
@@ -421,8 +446,7 @@
 - scan 后台线程与 scan_status/scan_cancel 经 `Arc<Mutex<ScanSession>>` 串行化；单进程 IPC 串行调用下无并发写风险，多窗口场景未定义（v1 单窗口）。
 - system_open_path 的 skill:<id> / tool:<id> 依赖 store / engine env 解析成功；skill 未入库或工具未安装时 NotFound（不猜测路径）。
 - trash_restore dest="central" 之外的目标（含原位恢复）推迟 v2；中央库内重名由 trash slot 命名空间规避（system.rs 复用 engine trash_restore 的 slot 语义）。
-- settings 为通用 key/value 透传（含 tools.disabled）；settings_set 的 key 白名单校验推迟 Phase 3 UI 表单层。
-- AppError 序列化为 Tauri 命令错误后前端拿到 `string`（serde 结构体字符串）；IPCTester 直接展示，Phase 3 若需结构化错误码再评估 serde 错误通道。
+- settings 为通用 key/value 透传（实际键有界：first_run.done / language / tools.disabled）；key 白名单校验未做，v1 接受。
 
 ## Step 5 磁盘优先：reconcile / doctor / fix（K4）
 
@@ -529,7 +553,6 @@
 
 遗留风险 / 备案：
 - **store→ports 同层依赖**（store 的 DbScanCache 实现 ports 的 ScanCache trait）：全 workspace 唯一同层边，无环无逆向，已裁决维持方案 A，§2.5 grep 守卫已配。
-- 19 vs 16 工具数目差异 **已裁决：按 19 统一，TASKBOOK 已更新**。
 - 基准环境为 NVMe + NTFS，fsync 非零但偏低；机械盘 / 冷盘需重测。WAL + synchronous=NORMAL 已设，丢指纹仅重算。
 - Windows 卷检查依赖 canonicalize 前缀解析，subst/网络驱动器映射盘符边界行为未专项测试。
 
@@ -565,9 +588,8 @@
 6. `target/release/skillbox-app.exe` → 5.87 MB（预算 ≤ 12 MB，与 Step 1 持平）
 
 遗留风险：
-- 19 vs 16 数目差异已裁决：统一按 19，TASKBOOK 已更新。
 - Trae / Trae CN 共用一条声明（两个候选目录）；若需拆成两个 adapter 改动很小。
-- 【待复核】路径清单见上；Phase 3 前 UI 不应假设这些路径必然存在（engine 探测失败会优雅降级）。
+- 【待复核】路径仍待官方来源核验（清单已汇入 docs/adapters.md 待复核清单）。
 - Hermes docs_url 暂为空字符串（官方文档未定），UI 需容忍空值。
 
 ## Step 1 骨架与契约
@@ -600,8 +622,6 @@
 DoD 补充验证：debug 版窗口进程启动后存活 8 秒正常关闭（WebView2 144.0.3719.104，渲染 "SkillBox"）。
 
 遗留风险：
-- 本机 git 状态特殊：D:\ 盘根有一个误建的 git 仓库（会拖慢全盘 git 操作），项目目录内已用独立 .git 隔离，建议用户择机删除 D:\.git。
 - rusqlite 锁 0.32（bundled SQLite 3.46），后续升级需迁移测试覆盖；libsqlite3-sys 编译依赖 cc 找到 MSVC（已装好，但换机器要注意）。
-- ReplacePolicy<'a> 带借用期，Phase 2 反序列化 IPC 参数时需从 &'de str 借用或提供 owned 镜像，留意 serde 借用约束。
 - tauri 2.x 解析为当前最新 2.12.4；后续 minor 升级可能带来行为变化（锁文件已提交可复现）。
 - 前端 build.target 用 Vite 默认（WebView2 Chromium 无兼容问题），若未来要兼容旧 WebView2 再收紧。

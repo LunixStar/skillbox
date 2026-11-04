@@ -13,3 +13,9 @@ tauri = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 skillbox-ipc = { workspace = true }
+
+[features]
+# 生产构建用：启用后 WebView 加载内嵌资源而非 devUrl（localhost:5173）。
+# 官方模板标注 "DO NOT REMOVE"；tauri CLI 构建时自动带上，
+# 裸 cargo 构建生产 exe 必须加 --features custom-protocol。
+custom-protocol = ["tauri/custom-protocol"]

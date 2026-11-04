@@ -26,9 +26,8 @@
 //! updates : check / apply                              (2)
 //! ```
 //!
-//! 占位命令（Phase 4 实装，结构化"尚未实现"错误）：
-//! `security_scan` / `security_report` / `cost_report` / `system_logs_export`
-//! / `updates_check` / `updates_apply`。
+//! 占位命令（结构化"尚未实现"错误，v1 收尾仍未实装）：
+//! 仅 `system_logs_export`（panels / updates 已在 Step 9-11 实装）。
 
 mod deploy;
 mod doctor;
