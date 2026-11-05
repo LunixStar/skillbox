@@ -3,7 +3,7 @@
 /// 更新语义按来源分派：git=fetch 比对（先看 diff 摘要再应用）、
 /// local=重新导入比对、archive=不支持在线更新（诚实提示）。
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   ArrowLeft,
   ExternalLink,
@@ -394,7 +394,10 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
 
       <div className="mt-4 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px] gap-3 overflow-hidden">
         {/* 左列：SKILL.md 预览 / 编辑（§9.3） */}
-        <section className="sb-card flex min-h-0 flex-col overflow-hidden p-0">
+        <section
+          className="sb-card sb-fade-up flex min-h-0 flex-col overflow-hidden p-0"
+          style={{ "--sb-i": 0 } as CSSProperties}
+        >
           <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
             <h3 className="flex-1 text-sm font-semibold text-ink">
               SKILL.md {editing ? t("detail.docEdit") : t("detail.docPreview")}
@@ -465,7 +468,7 @@ export default function SkillDetailPage({ skill, onBack }: SkillDetailPageProps)
         </section>
 
         {/* 右列：溯源 · 更新 · 部署状态 */}
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-0.5">
+        <div className="sb-fade-up flex min-h-0 flex-col gap-3 overflow-y-auto pr-0.5" style={{ "--sb-i": 1 } as CSSProperties}>
           <section className="sb-card p-4">
             <h3 className="text-sm font-semibold text-ink">{t("detail.originTitle")}</h3>
             <dl className="mt-2 space-y-2 text-xs leading-5">

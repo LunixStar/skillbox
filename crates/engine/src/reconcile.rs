@@ -9,7 +9,7 @@
 //!
 //! | 差异 | 判定 | severity | 建议修复 |
 //! |---|---|---|---|
-//! | `UnmanagedRealDir` | 真实目录且无记录，或记录为链接模式 | Warning | Adopt |
+//! | `UnmanagedRealDir` | 真实目录且无记录，或记录为链接模式 | Info | Adopt（收编注册） |
 //! | `BrokenLink` | 悬空链接（目标不存在） | Warning | 匹配到正本→RebuildLink，否则 RemoveLink |
 //! | `ForeignLink` | 链接指向中央库之外且未悬空 | Info | RemoveLink（仅提示） |
 //! | `MissingTarget` | 记录已部署但磁盘没有（含现状为真实文件） | Warning | Redeploy |
@@ -107,12 +107,14 @@ fn index_by_target(records: &[TargetRecord]) -> HashMap<(ToolId, PathBuf), &Targ
 fn unmanaged_real_dir(entry: &DiskEntry) -> Discrepancy {
     Discrepancy {
         kind: DiscrepancyKind::UnmanagedRealDir,
-        severity: Severity::Warning,
+        // 【修复】未纳管技能是"可收编的机会"而非风险：降为 Info 提示，
+        // 一键 Adopt（搬入中央库 + 原位链接）完成注册。
+        severity: Severity::Info,
         skill_id: None,
         tool_id: Some(entry.tool_id.clone()),
         path: entry.path.clone(),
         related: Vec::new(),
-        detail: "agent 目录中的真实目录非我们部署（无记录，或记录为链接模式）".to_string(),
+        detail: "发现未纳管技能（真实目录，无部署记录），可收编进中央库".to_string(),
         suggested_fix: SuggestedFix::Adopt,
     }
 }

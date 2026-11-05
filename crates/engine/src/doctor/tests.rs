@@ -163,9 +163,14 @@ fn doctor_end_to_end_classifies_all_states() {
 #[test]
 fn min_severity_filters_info_level_issues() {
     let env = HealthTestEnv::new();
+    // MissingTarget（Warning）：有记录无部署，应存活 Warning 过滤。
+    env.make_central_skill("gone", &[]);
+    env.register("gone", &[("claude", SyncMode::Symlink, None)]);
+    // UnmanagedRealDir（Info）：未纳管真实目录。
     let stray = env.target_path("claude", "stray");
     std::fs::create_dir_all(&stray).unwrap();
     std::fs::write(stray.join("SKILL.md"), b"---\nname: stray\n---\n").unwrap();
+    // ForeignLink（Info）：指向中央库之外。
     let elsewhere = env.root.path().join("elsewhere").join("foo");
     std::fs::create_dir_all(&elsewhere).unwrap();
     env.make_link(&elsewhere, &env.target_path("claude", "foreign"));
@@ -177,12 +182,38 @@ fn min_severity_filters_info_level_issues() {
     })
     .unwrap();
     assert!(report.issues.iter().all(|i| i.discrepancy.severity >= Severity::Warning));
-    assert!(report.issues.iter().any(|i| i.discrepancy.kind == DiscrepancyKind::UnmanagedRealDir));
+    assert!(report.issues.iter().any(|i| i.discrepancy.kind == DiscrepancyKind::MissingTarget));
+    assert!(!report.issues.iter().any(|i| i.discrepancy.kind == DiscrepancyKind::UnmanagedRealDir));
     assert!(!report.issues.iter().any(|i| i.discrepancy.kind == DiscrepancyKind::ForeignLink));
 
     // 不过滤时 Info 级也在。
     let report = run_doctor(&env, &["claude"]);
+    assert!(report.issues.iter().any(|i| i.discrepancy.kind == DiscrepancyKind::UnmanagedRealDir));
     assert!(report.issues.iter().any(|i| i.discrepancy.kind == DiscrepancyKind::ForeignLink));
+}
+
+/// 【修复体检误报】点前缀目录（agent 内部目录如 `.system`）与
+/// 无 SKILL.md 的目录不是技能，不参与对账；有 SKILL.md 的未纳管目录仍报告（Info）。
+#[test]
+fn inspect_skips_dot_dirs_and_dirs_without_skill_md() {
+    let env = HealthTestEnv::new();
+    // 点目录：agent 内部目录（无 SKILL.md，含标记文件）。
+    let dot = env.target_path("claude", ".system");
+    std::fs::create_dir_all(&dot).unwrap();
+    std::fs::write(dot.join("marker"), b"x").unwrap();
+    // 无 SKILL.md 的普通目录。
+    let plain = env.target_path("claude", "not-a-skill");
+    std::fs::create_dir_all(&plain).unwrap();
+    // 未纳管技能（有 SKILL.md）——仍应报告。
+    let stray = env.target_path("claude", "stray");
+    std::fs::create_dir_all(&stray).unwrap();
+    std::fs::write(stray.join("SKILL.md"), b"---\nname: stray\n---\n").unwrap();
+
+    let report = run_doctor(&env, &["claude"]);
+    let paths: HashSet<&Path> = report.issues.iter().map(|i| i.discrepancy.path.as_path()).collect();
+    assert!(!paths.iter().any(|p| p.ends_with(".system")), "点目录不应体检: {:?}", paths);
+    assert!(!paths.iter().any(|p| p.ends_with("not-a-skill")), "无 SKILL.md 目录不应体检: {:?}", paths);
+    assert!(paths.iter().any(|p| p.ends_with("stray")), "未纳管技能应报告: {:?}", paths);
 }
 
 #[test]

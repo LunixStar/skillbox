@@ -1,11 +1,13 @@
 //! 路径解析（§4.2）：纯函数层，home / config 根可注入；生产入口用 `dirs`。
 //!
-//! - `.config/` 前缀自动映射到 `dirs::config_dir()`（Linux XDG）；
+//! - `.config/` 前缀条目展开为双候选：字面 `~/.config/...`（XDG 风格
+//!   CLI 在 Windows 上仍用字面布局，如 OpenCode / Goose / DevEco Code）
+//!   与平台配置根（`dirs::config_dir()`，如 Zed）；
 //! - 覆写（[`ToolOverrides`]）优先于默认表路径，覆写即视为已安装；
 //! - `extra_scan_dirs` 解析结果类型级强制只读（§4.3：只发现登记、不部署）；
 //! - 本层零 IO：存在性检查以闭包注入，由 engine 传 `ports::FileSystem`。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -54,18 +56,43 @@ impl PathScope {
         &self.config
     }
 
-    /// 相对路径解析（§4.2）：`.config/` 前缀 → 配置根；其余 → home。
+    /// 相对路径解析（单候选；§4.2）：`.config/` 前缀 → 配置根；其余 → home。
     ///
     /// Linux 默认 XDG 下配置根即 `~/.config`，`.config/opencode/skills`
     /// 解析为 `~/.config/opencode/skills`（与字面路径一致）；
     /// 用户设置 `XDG_CONFIG_HOME` 后自动跟随 `dirs::config_dir()`。
     /// macOS / Windows 下 `.config/` 分别映射到
     /// `~/Library/Application Support` 与 `%APPDATA%`。
+    ///
+    /// 多候选探测 / 扫描请用 [`PathScope::resolve_candidates`]（字面
+    /// `~/.config` 与平台配置根双候选）；本方法保留给单值消费方。
     pub fn resolve(&self, rel: &str) -> PathBuf {
         match rel.strip_prefix(CONFIG_PREFIX) {
             Some(rest) => self.config.join(rest),
             None => self.home.join(rel),
         }
+    }
+
+    /// 相对路径条目的全部候选路径（§4.2，与 skills-manager
+    /// `candidate_paths` 语义一致）：
+    ///
+    /// - 字面 `~/<rel>` 恒为第一候选——XDG 风格 CLI（OpenCode / Goose /
+    ///   DevEco Code 等）在 Windows 上仍使用字面 `~/.config` 布局；
+    /// - `.config/` 前缀追加平台配置根候选（Linux XDG / macOS
+    ///   `~/Library/Application Support` / Windows `%APPDATA%`），覆盖
+    ///   Zed 等跟随平台配置根的工具；与字面候选相同时去重。
+    ///
+    /// 探测与扫描取「任一候选存在即命中」；部署目录取「首个存在的候选」，
+    /// 全部不存在时回落字面候选（见 `engine::env::deploy_dir_of`）。
+    pub fn resolve_candidates(&self, rel: &str) -> Vec<PathBuf> {
+        let mut candidates = vec![self.home.join(rel)];
+        if let Some(rest) = rel.strip_prefix(CONFIG_PREFIX) {
+            let config_path = self.config.join(rest);
+            if !candidates.contains(&config_path) {
+                candidates.push(config_path);
+            }
+        }
+        candidates
     }
 }
 
@@ -167,6 +194,7 @@ impl ToolAdapter {
     }
 
     /// 解析全局 skills 目录（可发现、可部署）。覆写优先于默认表路径。
+    /// 每个表条目展开为全部候选（`resolve_candidates`），跨条目去重。
     pub fn resolve_global_skills_dirs(
         &self,
         scope: &PathScope,
@@ -179,22 +207,35 @@ impl ToolAdapter {
                 .map(|path| ResolvedScanDir { path: path.clone(), kind: ScanDirKind::Deployable })
                 .collect();
         }
-        self.global_skills_dirs
-            .iter()
-            .map(|rel| ResolvedScanDir { path: scope.resolve(rel), kind: ScanDirKind::Deployable })
-            .collect()
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+        for rel in self.global_skills_dirs {
+            for path in scope.resolve_candidates(rel) {
+                if seen.insert(path.clone()) {
+                    resolved
+                        .push(ResolvedScanDir { path, kind: ScanDirKind::Deployable });
+                }
+            }
+        }
+        resolved
     }
 
     /// 解析 `extra_scan_dirs`（§4.3：类型级强制 `ReadOnly`——
     /// 只允许发现与登记，不允许部署，部署目标不明确）。
     pub fn resolve_extra_scan_dirs(&self, scope: &PathScope) -> Vec<ResolvedScanDir> {
-        self.extra_scan_dirs
-            .iter()
-            .map(|rel| ResolvedScanDir { path: scope.resolve(rel), kind: ScanDirKind::ReadOnly })
-            .collect()
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+        for rel in self.extra_scan_dirs {
+            for path in scope.resolve_candidates(rel) {
+                if seen.insert(path.clone()) {
+                    resolved.push(ResolvedScanDir { path, kind: ScanDirKind::ReadOnly });
+                }
+            }
+        }
+        resolved
     }
 
-    /// 解析探测路径（覆写优先于默认表路径）。
+    /// 解析探测路径（覆写优先于默认表路径；候选展开 + 去重）。
     pub fn resolve_detect_paths(
         &self,
         scope: &PathScope,
@@ -204,7 +245,16 @@ impl ToolAdapter {
         if let Some(paths) = overrides.detect_paths(&id) {
             return paths.to_vec();
         }
-        self.detect_paths.iter().map(|rel| scope.resolve(rel)).collect()
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+        for rel in self.detect_paths {
+            for path in scope.resolve_candidates(rel) {
+                if seen.insert(path.clone()) {
+                    resolved.push(path);
+                }
+            }
+        }
+        resolved
     }
 
     /// 项目级 skills 目录：相对**项目根**解析（与 home/config 无关）。
@@ -274,11 +324,67 @@ mod tests {
         let scope = scope_custom_xdg();
         let opencode = table::find("opencode").unwrap();
         let dirs = opencode.resolve_global_skills_dirs(&scope, &no_overrides());
-        assert_eq!(dirs[0].path, PathBuf::from("/data/xdg").join("opencode").join("skills"));
-        // Zed 同样走 .config/ 前缀
+        // 双候选：字面 `~/.config`（第一）+ 自定义 XDG 根（第二）。
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(
+            dirs[0].path,
+            PathBuf::from("/home/tester").join(".config").join("opencode").join("skills")
+        );
+        assert_eq!(dirs[1].path, PathBuf::from("/data/xdg").join("opencode").join("skills"));
+        // Zed 同样走 .config/ 前缀（双候选）
         let zed = table::find("zed").unwrap();
         let dirs = zed.resolve_global_skills_dirs(&scope, &no_overrides());
-        assert_eq!(dirs[0].path, PathBuf::from("/data/xdg").join("zed").join("skills"));
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(
+            dirs[0].path,
+            PathBuf::from("/home/tester").join(".config").join("zed").join("skills")
+        );
+        assert_eq!(dirs[1].path, PathBuf::from("/data/xdg").join("zed").join("skills"));
+    }
+
+    /// `.config/` 条目默认 XDG 下字面候选与配置根重合：必须去重为单候选。
+    #[test]
+    fn config_prefix_dedupes_when_literal_equals_config_root() {
+        let scope = scope_default_xdg();
+        let goose = table::find("goose").unwrap();
+        let dirs = goose.resolve_global_skills_dirs(&scope, &no_overrides());
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(
+            dirs[0].path,
+            PathBuf::from("/home/tester").join(".config").join("goose").join("skills")
+        );
+    }
+
+    /// 双候选语义：字面候选存在时命中（Windows 上 XDG 风格 CLI 的实际布局），
+    /// 平台配置根候选存在时同样命中（Zed 类工具）。
+    #[test]
+    fn either_candidate_satisfies_detection() {
+        let home = PathBuf::from("/home/tester");
+        // 字面布局（config 根指向别处）：字面候选存在即已安装。
+        let literal_scope = scope_custom_xdg();
+        let goose = table::find("goose").unwrap();
+        assert!(
+            goose.is_installed(&literal_scope, &no_overrides(), |p| {
+                p == &home.join(".config").join("goose")
+            })
+        );
+        // 平台配置根布局：配置根候选存在即已安装。
+        assert!(
+            goose.is_installed(&literal_scope, &no_overrides(), |p| {
+                p == &PathBuf::from("/data/xdg").join("goose")
+            })
+        );
+    }
+
+    /// 部署目录取首个存在的候选；全部不存在时回落字面候选（第一）。
+    #[test]
+    fn deploy_dir_prefers_first_existing_candidate() {
+        let scope = scope_custom_xdg();
+        let goose = table::find("goose").unwrap();
+        let dirs = goose.resolve_global_skills_dirs(&scope, &no_overrides());
+        // 字面候选在先
+        assert_eq!(dirs[0].path, PathBuf::from("/home/tester/.config/goose/skills"));
+        assert_eq!(dirs[1].path, PathBuf::from("/data/xdg/goose/skills"));
     }
 
     #[test]
@@ -288,13 +394,18 @@ mod tests {
         let dirs = claude.resolve_global_skills_dirs(&scope, &no_overrides());
         assert_eq!(dirs[0].path, PathBuf::from("/home/tester").join(".claude").join("skills"));
 
-        // Cline 的 Documents 路径无 .config/ 前缀：三平台均相对 home。
-        let cline = table::find("cline").unwrap();
-        let dirs = cline.resolve_global_skills_dirs(&scope, &no_overrides());
+        // Kimi 的 `.kimi-code/skills` 无 .config/ 前缀：三平台均相对 home。
+        let kimi = table::find("kimi").unwrap();
+        let dirs = kimi.resolve_global_skills_dirs(&scope, &no_overrides());
         assert_eq!(
             dirs[0].path,
-            PathBuf::from("/home/tester").join("Documents").join("Cline").join("Rules")
+            PathBuf::from("/home/tester").join(".kimi-code").join("skills")
         );
+
+        // Cline 采用 agents 标准共享根 `~/.agents/skills`：同样相对 home。
+        let cline = table::find("cline").unwrap();
+        let dirs = cline.resolve_global_skills_dirs(&scope, &no_overrides());
+        assert_eq!(dirs[0].path, PathBuf::from("/home/tester").join(".agents").join("skills"));
     }
 
     // --- 要求 4/5：覆写优先于默认路径；覆写即视为已安装 ---

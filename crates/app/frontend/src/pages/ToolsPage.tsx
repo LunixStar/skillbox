@@ -2,11 +2,12 @@
 /// 终端 TUI / 桌面助手）。已检测工具带启停开关 + 打开目录；
 /// 未检测工具折叠进"未检测到"区（默认收起，只读展示）。
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight, FolderOpen } from "lucide-react";
 import { ipcError, type ToolDto } from "../api/ipc";
 import { useOpenPath, useSetToolEnabled, useTools } from "../api/queries";
 import { Badge, Button, EmptyState, Skeleton, Toggle } from "../components/ui";
+import ToolIcon from "../components/ToolIcon";
 import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
 
@@ -89,14 +90,13 @@ export default function ToolsPage() {
                   {t(GROUP_LABEL_KEY[ff])}（{group.length}）
                 </div>
                 <div className="mt-2 space-y-1.5">
-                  {group.map((x) => (
+                  {group.map((x, i) => (
                     <div
                       key={x.id}
-                      className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-2.5"
+                      className="flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-2.5 sb-fade-up"
+                      style={{ "--sb-i": i } as CSSProperties}
                     >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-primary-soft text-sm font-semibold text-primary-active">
-                        {x.icon || x.displayName.slice(0, 1)}
-                      </span>
+                      <ToolIcon icon={x.icon} name={x.displayName} size={32} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-sm text-ink">
                           {x.displayName}
@@ -170,9 +170,7 @@ export default function ToolsPage() {
                               key={x.id}
                               className="flex items-center gap-3 rounded-card border border-dashed border-line bg-surface px-4 py-2 opacity-70"
                             >
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-surface text-sm font-semibold text-ink-faint">
-                                {x.icon || x.displayName.slice(0, 1)}
-                              </span>
+                              <ToolIcon icon={x.icon} name={x.displayName} size={32} muted />
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 text-sm text-ink">
                                   {x.displayName}

@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 const sb = {
-  primary: "var(--sb-primary)",
+  DEFAULT: "var(--sb-primary)",
   hover: "var(--sb-primary-hover)",
   active: "var(--sb-primary-active)",
   soft: "var(--sb-primary-soft)",

@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 interface CardProps {
   children: ReactNode;
   className?: string;
   interactive?: boolean;
   onClick?: () => void;
+  style?: CSSProperties;
 }
 
 export default function Card({
@@ -12,6 +13,7 @@ export default function Card({
   className = "",
   interactive = true,
   onClick,
+  style,
 }: CardProps) {
   return (
     <div
@@ -22,6 +24,7 @@ export default function Card({
         className,
       ].join(" ")}
       onClick={onClick}
+      style={style}
     >
       {children}
     </div>

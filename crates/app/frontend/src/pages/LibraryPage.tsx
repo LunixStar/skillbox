@@ -515,11 +515,11 @@ export default function LibraryPage() {
         ) : filtered.length === 0 ? (
           <EmptyState title={t("library.noMatchTitle")} description={t("library.noMatchDesc")} />
         ) : viewMode === "grid" ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+          <div key="view-grid" className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
             {filtered.map(renderCard)}
           </div>
         ) : filtered.length > 300 ? (
-          <div className="overflow-hidden rounded-card border border-line bg-page">
+          <div key="view-vlist" className="overflow-hidden rounded-card border border-line bg-page">
             {/* >300 条：自建虚拟滚动（§11 DoD） */}
             <VirtualList
               items={filtered}
@@ -529,7 +529,7 @@ export default function LibraryPage() {
             />
           </div>
         ) : (
-          <div className="overflow-hidden rounded-card border border-line bg-page">{filtered.map(renderRow)}</div>
+          <div key="view-list" className="overflow-hidden rounded-card border border-line bg-page">{filtered.map(renderRow)}</div>
         )}
       </div>
 

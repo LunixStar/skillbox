@@ -1,5 +1,6 @@
 /// 概览页：库规模统计 + 快捷操作。
 
+import type { CSSProperties } from "react";
 import { Link2, Library as LibraryIcon, Bot } from "lucide-react";
 import { ipcError } from "../api/ipc";
 import { useLibrary, useOpenPath, useTargets, useTools } from "../api/queries";
@@ -33,8 +34,8 @@ export default function OverviewPage({ onNavigate }: OverviewPageProps) {
     <div className="mx-auto w-full max-w-3xl px-8 py-8">
       <h1 className="text-lg font-semibold text-ink">{t("overview.title")}</h1>
       <div className="mt-5 grid grid-cols-3 gap-3">
-        {stats.map((s) => (
-          <Card key={s.label} className="px-4 py-4">
+        {stats.map((s, i) => (
+          <Card key={s.label} className="sb-fade-up px-4 py-4" style={{ "--sb-i": i } as CSSProperties}>
             <div className="flex items-center gap-1.5 text-xs text-ink-secondary">
               {s.icon}
               {s.label}
@@ -47,7 +48,7 @@ export default function OverviewPage({ onNavigate }: OverviewPageProps) {
       </div>
 
       <h2 className="mt-8 text-sm font-semibold text-ink">{t("overview.quickActions")}</h2>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-2 sb-fade-up" style={{ "--sb-i": 3 } as CSSProperties}>
         <Button variant="primary" onClick={() => onNavigate("library")}>
           {t("overview.openLibrary")}
         </Button>

@@ -170,15 +170,26 @@ pub(crate) fn inspect_disk(ctx: &HealthContext, tools: Option<&[ToolId]>) -> App
             continue;
         }
         for meta in ctx.fs.read_dir(&target.path)? {
+            // 【噪声过滤】跳过两类绝非技能部署的条目（修复体检误报）：
+            // 1) 点前缀（`.system`、`.DS_Store` 等工具内部/隐藏条目）；
+            // 2) 根下没有 SKILL.md 的真实目录（不是技能，不归我们管）。
+            if meta.name.starts_with('.') {
+                continue;
+            }
             let path = target.path.join(&meta.name);
-            entries.push(inspect_entry(
+            if matches!(meta.kind, EntryKind::Dir) && !ctx.fs.exists(&path.join("SKILL.md")) {
+                continue;
+            }
+            if let Some(entry) = inspect_entry(
                 ctx,
                 &target.tool_id,
                 &path,
                 &meta,
                 &skill_by_canonical,
                 &central_canon,
-            )?);
+            )? {
+                entries.push(entry);
+            }
         }
     }
     Ok(DiskView { entries })
@@ -191,6 +202,8 @@ pub(crate) fn inspect_disk(ctx: &HealthContext, tools: Option<&[ToolId]>) -> App
 ///   中央库外 → `ForeignLink`；悬空一律 `ForeignLink` + `link_broken`，
 ///   由 reconcile 走 BrokenLink 判定）；
 /// - 文件 / 其他：`RealFile`。
+///
+/// 噪声过滤（点前缀、无 SKILL.md 的目录）由调用方 `inspect_disk` 完成。
 fn inspect_entry(
     ctx: &HealthContext,
     tool_id: &ToolId,
@@ -198,7 +211,7 @@ fn inspect_entry(
     meta: &EntryMeta,
     skill_by_canonical: &HashMap<PathBuf, SkillId>,
     central_canon: &Path,
-) -> AppResult<DiskEntry> {
+) -> AppResult<Option<DiskEntry>> {
     let mut entry = DiskEntry {
         tool_id: tool_id.clone(),
         path: path.to_path_buf(),
@@ -245,7 +258,7 @@ fn inspect_entry(
             entry.state = TargetState::RealFile;
         }
     }
-    Ok(entry)
+    Ok(Some(entry))
 }
 
 // ---------------------------------------------------------------------------

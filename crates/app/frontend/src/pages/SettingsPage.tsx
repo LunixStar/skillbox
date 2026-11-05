@@ -1,6 +1,7 @@
 /// 设置页：界面语言（zh-CN / en，立即生效并持久化）+ 中央库入口。
 /// 语言持久化由 I18nProvider 的 setLang 统一落 settings 表，此处只负责 UI。
 
+import type { CSSProperties } from "react";
 import { FolderOpen } from "lucide-react";
 import { ipcError } from "../api/ipc";
 import { useOpenPath } from "../api/queries";
@@ -25,7 +26,7 @@ export default function SettingsPage() {
 
       <div className="mt-5 max-w-xl space-y-3">
         {/* 界面语言（§0.4 Phase 5 i18n） */}
-        <section className="sb-card p-4">
+        <section className="sb-card sb-fade-up p-4" style={{ "--sb-i": 0 } as CSSProperties}>
           <h3 className="text-sm font-semibold text-ink">{t("settings.language")}</h3>
           <p className="mt-1 text-xs leading-5 text-ink-secondary">{t("settings.languageHint")}</p>
           <div className="mt-3 flex items-center gap-0.5 rounded-btn border border-line bg-page p-0.5">
@@ -47,7 +48,7 @@ export default function SettingsPage() {
         </section>
 
         {/* 中央库（只读展示 + 打开入口，路径由后端管理 §3.1） */}
-        <section className="sb-card p-4">
+        <section className="sb-card sb-fade-up p-4" style={{ "--sb-i": 1 } as CSSProperties}>
           <h3 className="text-sm font-semibold text-ink">{t("settings.centralTitle")}</h3>
           <p className="mt-1 font-mono text-xs leading-5 text-ink-secondary">~/.skillbox/skills</p>
           <p className="mt-1 text-xs leading-5 text-ink-secondary">{t("settings.centralDesc")}</p>

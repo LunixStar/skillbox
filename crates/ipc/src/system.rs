@@ -132,30 +132,18 @@ fn http_url_of(id: &str) -> Option<&str> {
     Some(id)
 }
 
-/// 用系统文件管理器打开目录（跨平台）。
+/// 用系统文件管理器打开目录。
+///
+/// 【修复】此前 Windows 用 `Command::new("explorer").arg(path)`（CreateProcess），
+/// Win11 上进程能启动但不弹窗；改走官方 opener 插件（ShellExecuteW 语义，
+/// 与资源管理器右键"打开"一致），macOS/Linux 由插件分别代理 open / xdg-open。
 fn open_in_file_manager(path: &Path) -> AppResult<()> {
-    let spawned = if cfg!(target_os = "windows") {
-        std::process::Command::new("explorer").arg(path).spawn()
-    } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(path).spawn()
-    } else {
-        std::process::Command::new("xdg-open").arg(path).spawn()
-    };
-    spawned
-        .map(|_| ())
+    tauri_plugin_opener::open_path(path, None::<&str>)
         .map_err(|e| AppError::io(format!("打开路径失败: {e}")))
 }
 
 /// 用默认浏览器打开 URL（跨平台；参数已过 `http_url_of` 白名单校验）。
 fn open_in_browser(url: &str) -> AppResult<()> {
-    let spawned = if cfg!(target_os = "windows") {
-        std::process::Command::new("explorer").arg(url).spawn()
-    } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(url).spawn()
-    } else {
-        std::process::Command::new("xdg-open").arg(url).spawn()
-    };
-    spawned
-        .map(|_| ())
+    tauri_plugin_opener::open_url(url, None::<&str>)
         .map_err(|e| AppError::io(format!("打开 URL 失败: {e}")))
 }

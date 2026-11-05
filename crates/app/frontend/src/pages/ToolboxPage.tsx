@@ -1,7 +1,7 @@
 /// 工具箱页（§11.3 / §9）：安全扫描总览 + 上下文成本分析。
 /// 专业功能收进折叠区，不污染主界面（库 / 工具 / 体检）。
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, ShieldCheck, Unlink } from "lucide-react";
 import {
@@ -98,7 +98,7 @@ function SecuritySection() {
   const overviewFindings = overview.data?.findings.length ?? 0;
 
   return (
-    <section className="sb-card p-4">
+    <section className="sb-card sb-fade-up p-4" style={{ "--sb-i": 0 } as CSSProperties}>
       <div className="flex items-center gap-2">
         <ShieldCheck size={15} className="text-primary" />
         <h3 className="text-sm font-semibold text-ink">{t("toolbox.securityTitle")}</h3>
@@ -215,7 +215,7 @@ function CostSection() {
   const maxTokens = Math.max(1, ...perTool.map((x) => x.estimatedTokens));
 
   return (
-    <section className="sb-card p-4">
+    <section className="sb-card sb-fade-up p-4" style={{ "--sb-i": 1 } as CSSProperties}>
       <div className="flex items-center gap-2">
         <h3 className="text-sm font-semibold text-ink">{t("toolbox.costTitle")}</h3>
         <Badge tone="neutral">{t("toolbox.costBadge")}</Badge>
@@ -297,7 +297,7 @@ export default function ToolboxPage() {
         <SecuritySection />
         <CostSection />
       </div>
-      <div className="mt-3 max-w-5xl">
+      <div className="sb-fade-up mt-3 max-w-5xl" style={{ "--sb-i": 2 } as CSSProperties}>
         <EmptyState title={t("toolbox.moreTitle")} description={t("toolbox.moreDesc")} />
       </div>
     </div>

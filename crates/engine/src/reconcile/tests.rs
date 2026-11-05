@@ -81,7 +81,8 @@ fn unmanaged_real_dir_without_record_or_with_symlink_record() {
         &index(vec![], vec![]),
     );
     assert_eq!(kinds(&out), vec![DiscrepancyKind::UnmanagedRealDir]);
-    assert_eq!(out[0].severity, Severity::Warning);
+    // 未纳管技能是收编机会而非风险：Info 提示 + Adopt（修复体检误报）。
+    assert_eq!(out[0].severity, Severity::Info);
     assert_eq!(out[0].suggested_fix, SuggestedFix::Adopt);
 
     // 记录为链接模式，磁盘却是真实目录 → 同样 UnmanagedRealDir

@@ -214,21 +214,23 @@ pub struct ToolAdapter {
 }
 ```
 
-### 4.2 v1 首批内置 19 个，按形态分组
+### 4.2 内置工具声明表（v1.0 首批 19 个 → v1.1 扩至 56 个）
 
 【硬约束】**必须按形态分组呈现给 UI**，侧栏与工具页都要有"形态"分节/筛选，这是本项目与原版的关键差异。
 
-| 形态 | 工具 |
-|---|---|
-| **CLI** | Claude Code（`~/.claude/skills`）、Codex（`~/.codex/skills`）、Gemini CLI（`~/.gemini/skills`）、OpenCode（`~/.config/opencode/skills`，项目级 `.opencode/skills`）、Qwen Code、Grok |
-| **IDE / 桌面端** | Cursor（`~/.cursor/skills`）、Windsurf、Trae / Trae CN、Antigravity、Zed（`~/.config/zed/...`） |
-| **编辑器插件** | GitHub Copilot（`~/.github/instructions`）、Continue（`~/.continue/rules`）、Cline（`~/Documents/Cline/Rules`）、Roo Code（`~/.roo/rules`） |
-| **终端 TUI** | Crush、Amp |
-| **桌面助手** | OpenClaw、Hermes（`recursive_scan: true`） |
+v1.1（REVIEW #2）以开源 skills-manager（MIT，github.com/xingkongliang/skills-manager）的 56 代理适配表为基准扩表，另加本机实证的 DevEco Code，合计 56 个（CLI 31 / IDE·桌面端 8 / 编辑器插件 8 / 终端 TUI 3 / 桌面助手 6）。重叠工具以 skills-manager 实证路径为准（v1.0 的六项猜测路径被替换：antigravity / github_copilot / cline / roo_code / continue / amp）。全表见 `docs/adapters.md`。
+
+| 形态 | 数量 | 代表工具 |
+|---|---|---|
+| **CLI** | 31 | Claude Code（`~/.claude/skills`）、Codex、Gemini CLI、OpenCode（**不对称**：全局 `~/.config/opencode/skills` / 项目级 `.opencode/skills`）、Qwen Code、Grok、OMP Agent、Goose、Droid、Kimi Code CLI、Replit、OpenHands、Pi、MiniMax Code、DeepSeek Harness、DevEco Code（`~/.config/deveco/skills` + `~/.local/share/deveco/skills` 双根，本机实证）等 |
+| **IDE / 桌面端** | 8 | Cursor（`~/.cursor/skills`）、Windsurf、Trae / Trae CN（双候选）、Antigravity（`~/.gemini/config/skills`）、Zed（`~/.config/zed/...`）、Kiro、Qoder、CodeBuddy |
+| **编辑器插件** | 8 | GitHub Copilot（`~/.copilot/skills`）、Continue（`~/.continue/skills`）、Cline（`~/.agents/skills` 共享根）、Roo Code（`~/.roo/skills`）、Kilo Code、Augment、Junie、GitLab Duo |
+| **终端 TUI** | 3 | Crush、Amp（仅 macOS/Linux）、Warp |
+| **桌面助手** | 6 | OpenClaw、Hermes（`recursive_scan: true`，唯一递归）、QClaw、EasyClaw、AutoClaw、WorkBuddy / WorkBuddy AI（双候选合并声明） |
 
 - 每个 adapter 的注释里**必须写清该路径的来源依据**（官方文档/仓库路径），并注明是否存在"全局与项目级路径不对称"的情形。
-- 路径解析支持 `.config/` 前缀自动映射到 `dirs::config_dir()`（Linux XDG）。
-- `is_installed()` = `detect_paths` 任一存在；路径被用户显式覆写时视为已安装。
+- 路径解析支持 `.config/` 前缀**双候选展开**（v1.1）：字面 `~/.config/<rel>` 与 `dirs::config_dir()`（Linux XDG 映射）两个候选，先字面后平台根，探测任一存在即命中，部署取第一个存在者。
+- `is_installed()` = `detect_paths` 任一存在；路径被用户显式覆写时视为已安装。多候选根工具（Trae / WorkBuddy / DevEco Code）同理。
 
 ### 4.3 插件/缓存类目录的处理
 

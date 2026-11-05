@@ -1,10 +1,9 @@
 /// 主框架侧边栏（§11.3）：概览 / 技能库★ / 工具 / 体检 / 工具箱 / 设置，
-/// 底部为开发者入口与中央库快捷方式。选中项：3px 蓝色左指示条 + primary-soft 底。
+/// 底部为开发者入口。选中项：3px 蓝色左指示条 + primary-soft 底。
 
 import {
   Bot,
   FlaskConical,
-  FolderOpen,
   LayoutDashboard,
   Library as LibraryIcon,
   Palette,
@@ -13,9 +12,6 @@ import {
   Toolbox as ToolboxIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { ipcError } from "../api/ipc";
-import { useOpenPath } from "../api/queries";
-import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
 
 export type ShellView =
@@ -77,10 +73,7 @@ function NavButton({ item, active, onSelect }: { item: NavItem; active: boolean;
 }
 
 export default function Sidebar({ view, onSelect, showDev = false }: SidebarProps) {
-  const openPath = useOpenPath();
-  const toast = useToast();
   const { t } = useI18n();
-
   return (
     <aside className="flex w-48 shrink-0 flex-col border-r border-line bg-page">
       <div className="px-4 pt-5 pb-3">
@@ -100,20 +93,6 @@ export default function Sidebar({ view, onSelect, showDev = false }: SidebarProp
           ))}
         </div>
       )}
-      <div className="border-t border-line px-2 py-2">
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-r-btn px-3 py-2 text-sm text-ink-secondary transition-colors duration-120 hover:bg-surface hover:text-ink"
-          onClick={() =>
-            openPath.mutate("central", {
-              onError: (e) => toast.show(ipcError(e), "danger"),
-            })
-          }
-        >
-          <FolderOpen size={16} />
-          {t("common.openCentralLibrary")}
-        </button>
-      </div>
     </aside>
   );
 }

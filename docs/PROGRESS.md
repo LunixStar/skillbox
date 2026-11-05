@@ -1,5 +1,27 @@
 # SkillBox 开发进度
 
+## v1.1（2026-11-04）：REVIEW 八项修复 — 扩表 56 工具 + 图标 + opener + 误报根因 + 全页动画
+
+状态：完成（docs/REVIEW.md 全部 8 项 ✅）
+
+做了：
+- **#1 按钮隐身**：`tailwind.config.cjs` 主题色误写 `primary: {...}` 缺 `DEFAULT`，`bg-primary` 等全失效 → 恢复 `DEFAULT:`。
+- **#2 扩表 19 → 56**：以 skills-manager（MIT，github.com/xingkongliang/skills-manager）56 代理适配表为基准 + 本机实证 DevEco Code，合计 56（CLI 31 / IDE·桌面端 8 / 编辑器插件 8 / 终端 TUI 3 / 桌面助手 6）。`resolve.rs` 新增 `PathScope::resolve_candidates`：`.config/` 前缀双候选展开（字面 `~/.config` + `dirs::config_dir()`，先字面后平台根，探测任一存在、部署取第一个存在者）；重叠 6 工具（antigravity/github_copilot/cline/roo_code/continue/amp）改用 SM 实证路径；Trae/WorkBuddy 多候选合并声明；codex/pi/deepseek_harness/minimax_code/gitlab_duo 增加 `.agents/skills` 只读发现回退。`table.rs` 全量重写。
+- **#3 资源管理器打不开**：引入 `tauri-plugin-opener = "2"`，system.rs `open_path`/`open_url` 替换 shell open。
+- **#4 工具页图标**：下载 46 个品牌图标（SM 仓库 jsdelivr，155KB）至 `frontend/public/agent-icons/`；新 `ToolIcon.tsx`（ASSETS 46 + ALIASES omp_agent→oh_my_pi + hue 字母回退）；ToolsPage 已检测/未检测两行接入；LibraryPage/SkillDetailPage 小型部署 chip 保留 2 字符文字（尺寸过小，刻意）。
+- **#5 体检误报根因**：doctor.rs `inspect_disk` 跳过点目录与无 SKILL.md 目录；reconcile.rs 未纳管真实目录 Warning→Info（可收编）。
+- **#6 技能库三视图动画**：grid/vlist/list 三分支补 `view-grid`/`view-vlist`/`view-list` key（原三分支共享 key 致 React 复用旧节点、动画丢失）。
+- **#7 全页入场动画**：Overview（3 卡 + 快捷操作）/ Tools（行）/ Toolbox（两节）/ Settings（两节）/ SkillDetail（左右列）补 `sb-fade-up` + `--sb-i` 阶梯（Doctor/Library v1.0 已有）；Card 组件支持 style 透传。
+- **#8 侧栏冗余**：删除侧栏底部「打开中央库」按钮（设置页保留）。
+- 文档：TASKBOOK §4.2 更新为 56 工具 + 双候选解析规则；docs/adapters.md 全量重写（56 行全表 + v1.1 扩表说明 + 待复核清单收缩）；docs/REVIEW.md 附修复记录表。
+
+自检输出（真实结果）：
+1. `cargo test --workspace` → 212 passed / 0 failed（adapters 29、domain 6、engine 155、ports 9、store 13）
+2. `npm run build` → 通过（5.74s，2065 modules；i18n used=244 defined=311 zh/en 全对齐，missing=0）
+3. `tauri build`（node_modules 本地 CLI）→ Finished 3m06s；exe **8.03MB ≤ 12MB**；NSIS bundle 2.50MB
+4. CDP（WebView2 :9333）逐项核验：按钮配色可见（#1）；工具页 7 已检测 + 48 未检测 + Amp 平台掩码 = 56（#2）；45 图标全部 naturalWidth>0、10 字母回退（#4）；体检 43 项全在「提示」分组、未纳管带收编动作（#5）；技能库网格↔列表切换两向 59 行 sb-fade-up（#6）；Overview 4 / Toolbox 2 / Settings 2 / SkillDetail 2 fade-up（#7）；侧栏无底部按钮（#8）；点击「打开目录」→ Explorer 实开 `C:\Users\15951\.skillbox\skills\imagegen` 窗口（#3）。
+5. DevEco Code 本机实证双根：`~/.config/deveco/skills`（17）+ `~/.local/share/deveco/skills`（21）。
+
 ## 构建修正（2026-10-21）：release exe 双击显示「无法连接」页 — custom-protocol 特性缺失
 
 状态：完成
